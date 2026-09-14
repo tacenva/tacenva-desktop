@@ -10,6 +10,7 @@ import (
 	"github.com/tacenva/replica-core/app"
 	"github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/replica-core/app/vault"
+	"github.com/tacenva/tacenva-desktop/internal/ui/vaultrecord"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/entity"
 )
@@ -244,31 +245,70 @@ func New(
 		},
 	)
 
-	entryHeader := container.NewBorder(
-		search,
+	// Content utama yang akan direplace ketika user masuk
+	// ke Vault Records.
+	content := container.NewMax()
+
+	vaultContent := container.NewBorder(
+		container.NewBorder(
+			search,
+			nil,
+			nil,
+			container.NewHBox(
+				syncButton,
+				newEntryButton,
+			),
+			widget.NewLabelWithStyle(
+				"All Items",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{
+					Bold: true,
+				},
+			),
+		),
 		nil,
 		nil,
-		container.NewHBox(
-			syncButton,
-			newEntryButton,
-		),
-		widget.NewLabelWithStyle(
-			"All Items",
-			fyne.TextAlignLeading,
-			fyne.TextStyle{
-				Bold: true,
-			},
-		),
+		nil,
+		entryList,
 	)
 
+	content.Objects = []fyne.CanvasObject{
+		vaultContent,
+	}
+
+	entryList.OnSelected = func(id widget.ListItemID) {
+		if id < 0 || id >= len(vaultAccesses) {
+			return
+		}
+
+		selectedVaultAccess := vaultAccesses[id]
+
+		recordScreen := vaultrecord.New(
+			window,
+			appDeps,
+			context,
+			masterKey,
+			coreService,
+			sotService,
+			&selectedVaultAccess,
+			func() {
+				content.Objects = []fyne.CanvasObject{
+					vaultContent,
+				}
+				content.Refresh()
+			},
+		)
+
+		content.Objects = []fyne.CanvasObject{
+			recordScreen.Content,
+		}
+		content.Refresh()
+
+		entryList.Unselect(id)
+	}
+
 	return &Screen{
-		Content: container.NewBorder(
-			entryHeader,
-			nil,
-			nil,
-			nil,
-			entryList,
-		),
+		Content: content,
 	}
 }
 
@@ -288,15 +328,11 @@ func showForm(
 	nameEntry := widget.NewEntry()
 	nameEntry.SetText(vault.Name)
 
-	formItems := []*widget.FormItem{
+	form := widget.NewForm(
 		widget.NewFormItem(
 			"Name",
 			nameEntry,
 		),
-	}
-
-	form := widget.NewForm(
-		formItems...,
 	)
 
 	formContainer := container.NewGridWrap(

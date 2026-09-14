@@ -87,12 +87,35 @@ func New(
 				deleteButton,
 			)
 
-			return container.NewBorder(
+			nameCell := container.NewBorder(
+				nil,
+				nil,
 				nil,
 				nil,
 				name,
-				actions,
+			)
+
+			addressCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				nil,
 				address,
+			)
+
+			actionCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				actions,
+				nil,
+			)
+
+			return container.NewGridWithColumns(
+				3,
+				nameCell,
+				addressCell,
+				actionCell,
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -104,9 +127,13 @@ func New(
 
 			row := obj.(*fyne.Container)
 
-			name := row.Objects[0].(*widget.Label)
-			address := row.Objects[1].(*widget.Label)
-			actions := row.Objects[2].(*fyne.Container)
+			nameCell := row.Objects[0].(*fyne.Container)
+			addressCell := row.Objects[1].(*fyne.Container)
+			actionCell := row.Objects[2].(*fyne.Container)
+
+			name := nameCell.Objects[0].(*widget.Label)
+			address := addressCell.Objects[0].(*widget.Label)
+			actions := actionCell.Objects[0].(*fyne.Container)
 
 			editButton := actions.Objects[0].(*widget.Button)
 			deleteButton := actions.Objects[1].(*widget.Button)
@@ -137,6 +164,8 @@ func New(
 					selectedSot.Hostname,
 					func() {
 						sotService.Del(&selectedSot)
+						sotList = append(sotList[:id], sotList[id+1:]...)
+						list.Refresh()
 					},
 				)
 			}
