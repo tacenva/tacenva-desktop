@@ -282,9 +282,11 @@ func showForm(
 
 	hostnameEntry := widget.NewEntry()
 	hostnameEntry.SetText(sot.Hostname)
+	hostnameEntry.SetPlaceHolder("Optional alias")
 
 	addressEntry := widget.NewEntry()
 	addressEntry.SetText(sot.Address)
+	addressEntry.SetPlaceHolder("Source of Truth address")
 
 	publicKeyEntry := widget.NewMultiLineEntry()
 	publicKeyEntry.SetText(sot.KeyPair.PublicKey)
@@ -370,10 +372,10 @@ func showForm(
 			hostname := hostnameEntry.Text
 			address := addressEntry.Text
 
-			if hostname == "" || address == "" {
+			if address == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
-					"Hostname dan address wajib diisi.",
+					"Address wajib diisi.",
 					window,
 				)
 
