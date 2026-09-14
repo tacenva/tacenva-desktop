@@ -80,11 +80,35 @@ func New(
 				deleteButton,
 			)
 
+			nameCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				nil,
+				name,
+			)
+
+			privilegeCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				nil,
+				privilege,
+			)
+
+			actionCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				actions,
+				nil,
+			)
+
 			return container.NewGridWithColumns(
 				3,
-				name,
-				privilege,
-				actions,
+				nameCell,
+				privilegeCell,
+				actionCell,
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -96,9 +120,13 @@ func New(
 
 			row := obj.(*fyne.Container)
 
-			name := row.Objects[0].(*widget.Label)
-			privilege := row.Objects[1].(*widget.Label)
-			actions := row.Objects[2].(*fyne.Container)
+			nameCell := row.Objects[0].(*fyne.Container)
+			privilegeCell := row.Objects[1].(*fyne.Container)
+			actionCell := row.Objects[2].(*fyne.Container)
+
+			name := nameCell.Objects[0].(*widget.Label)
+			privilege := privilegeCell.Objects[0].(*widget.Label)
+			actions := actionCell.Objects[0].(*fyne.Container)
 
 			editButton := actions.Objects[0].(*widget.Button)
 			deleteButton := actions.Objects[1].(*widget.Button)
@@ -236,6 +264,12 @@ func New(
 			coreService,
 			acService,
 			&selectedPermission,
+			func() {
+				content.Objects = []fyne.CanvasObject{
+					acContent,
+				}
+				content.Refresh()
+			},
 		)
 
 		content.Objects = []fyne.CanvasObject{

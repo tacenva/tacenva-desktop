@@ -1,4 +1,4 @@
-package vaultrecord
+package vault
 
 import (
 	"time"
@@ -21,12 +21,12 @@ import (
 
 const hiddenPassword = "••••••••"
 
-type Screen struct {
+type RecordScreen struct {
 	Content      fyne.CanvasObject
 	vaultRecords []entity.VaultRecord
 }
 
-func New(
+func NewRecordScreen(
 	window fyne.Window,
 	appDeps *app.Deps,
 	context *app.Context,
@@ -35,7 +35,7 @@ func New(
 	sotService *sourceoftruth.Service,
 	vaultAccess *entity.VaultAccess,
 	onBack func(),
-) *Screen {
+) *RecordScreen {
 	vaultService := vault.NewService(
 		appDeps,
 		context,
@@ -309,7 +309,7 @@ func New(
 			updateButton.OnTapped = func() {
 				selectedRecord := record
 
-				showForm(
+				showRecordForm(
 					window,
 					&selectedRecord,
 					func(updated *entity.VaultRecord) {
@@ -357,7 +357,7 @@ func New(
 		"New Entry",
 		theme.ContentAddIcon(),
 		func() {
-			showForm(
+			showRecordForm(
 				window,
 				nil,
 				func(newRecord *entity.VaultRecord) {
@@ -400,13 +400,13 @@ func New(
 		entryList,
 	)
 
-	return &Screen{
+	return &RecordScreen{
 		Content:      content,
 		vaultRecords: vaultRecords,
 	}
 }
 
-func showForm(
+func showRecordForm(
 	window fyne.Window,
 	selectedRecord *entity.VaultRecord,
 	onSave func(record *entity.VaultRecord),

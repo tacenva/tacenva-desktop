@@ -10,7 +10,6 @@ import (
 	"github.com/tacenva/replica-core/app"
 	"github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/replica-core/app/vault"
-	"github.com/tacenva/tacenva-desktop/internal/ui/vaultrecord"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/entity"
 )
@@ -283,7 +282,7 @@ func New(
 
 		selectedVaultAccess := vaultAccesses[id]
 
-		recordScreen := vaultrecord.New(
+		recordScreen := NewRecordScreen(
 			window,
 			appDeps,
 			context,

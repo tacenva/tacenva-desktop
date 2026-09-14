@@ -24,6 +24,7 @@ func NewUser(
 	coreService *coreApp.Services,
 	acService *accesscontrol.Service,
 	selectedPermission *entity.Permission,
+	onBack func(),
 ) *UserScreen {
 	userList, err := acService.UserList(selectedPermission.ID)
 	if err != nil {
@@ -50,6 +51,12 @@ func NewUser(
 		}
 	}
 
+	backButton := widget.NewButtonWithIcon(
+		selectedPermission.Name,
+		theme.NavigateBackIcon(),
+		onBack,
+	)
+
 	entryList = widget.NewList(
 		func() int {
 			return len(userList)
@@ -75,11 +82,35 @@ func NewUser(
 				revokeButton,
 			)
 
+			hostnameCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				nil,
+				hostname,
+			)
+
+			statusCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				nil,
+				status,
+			)
+
+			actionCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				actions,
+				nil,
+			)
+
 			return container.NewGridWithColumns(
 				3,
-				hostname,
-				status,
-				actions,
+				hostnameCell,
+				statusCell,
+				actionCell,
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -91,9 +122,13 @@ func NewUser(
 
 			row := obj.(*fyne.Container)
 
-			hostname := row.Objects[0].(*widget.Label)
-			status := row.Objects[1].(*widget.Label)
-			actions := row.Objects[2].(*fyne.Container)
+			hostnameCell := row.Objects[0].(*fyne.Container)
+			statusCell := row.Objects[1].(*fyne.Container)
+			actionCell := row.Objects[2].(*fyne.Container)
+
+			hostname := hostnameCell.Objects[0].(*widget.Label)
+			status := statusCell.Objects[0].(*widget.Label)
+			actions := actionCell.Objects[0].(*fyne.Container)
 
 			approveButton := actions.Objects[0].(*widget.Button)
 			revokeButton := actions.Objects[1].(*widget.Button)
@@ -172,9 +207,22 @@ func NewUser(
 
 	content := container.NewMax()
 
+	toolbar := container.NewBorder(
+		nil,
+		nil,
+		backButton,
+		nil,
+		nil,
+	)
+
+	entryHeader := container.NewVBox(
+		toolbar,
+		search,
+	)
+
 	userContent := container.NewBorder(
 		container.NewBorder(
-			search,
+			entryHeader,
 			nil,
 			nil,
 			nil,

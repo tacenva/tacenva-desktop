@@ -9,6 +9,7 @@ import (
 	"github.com/tacenva/replica-core/app"
 	"github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
+	"github.com/tacenva/tacenva-desktop/internal/ui/setting"
 	"github.com/tacenva/tacenva-desktop/internal/ui/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
 )
@@ -41,6 +42,13 @@ func New(
 		appDeps,
 		context,
 		coreService,
+	)
+
+	settingScreen := setting.New(
+		window,
+		func(currentPassword, newPassword string) error {
+			return sotService.ChangePassword(currentPassword, newPassword)
+		},
 	)
 
 	title := widget.NewLabelWithStyle(
@@ -81,7 +89,9 @@ func New(
 			mainContent.Refresh()
 		},
 		func() {
-			mainContent.Objects = []fyne.CanvasObject{}
+			mainContent.Objects = []fyne.CanvasObject{
+				settingScreen.Content,
+			}
 			mainContent.Refresh()
 		},
 	)
@@ -91,7 +101,7 @@ func New(
 		nil,
 		sidebar,
 		nil,
-		mainContent,
+		container.NewPadded(mainContent),
 	)
 
 	content := container.NewBorder(

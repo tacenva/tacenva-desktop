@@ -107,7 +107,7 @@ func newSidebar(
 	settingsMenu func(),
 ) fyne.CanvasObject {
 	logo := widget.NewLabelWithStyle(
-		"Tacpass",
+		"Menu",
 		fyne.TextAlignLeading,
 		fyne.TextStyle{
 			Bold: true,
