@@ -27,7 +27,7 @@ jobs:
             goarch: arm64
 
           # macOS
-          - runner: macos-13
+          - runner: macos-15-intel
             goos: darwin
             goarch: amd64
 
@@ -94,7 +94,7 @@ jobs:
             ./cmd/tacenva
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: tacenva-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
@@ -106,7 +106,7 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
