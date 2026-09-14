@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -22,8 +23,7 @@ import (
 const hiddenPassword = "••••••••"
 
 type RecordScreen struct {
-	Content      fyne.CanvasObject
-	vaultRecords []entity.VaultRecord
+	Content fyne.CanvasObject
 }
 
 func NewRecordScreen(
@@ -45,14 +45,23 @@ func NewRecordScreen(
 		sotService,
 	)
 
+	var searchTimer *time.Timer
+
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search passwords...")
 
-	vaultRecords, needSync, err := vaultService.ListRecords(vaultAccess)
+	allVaultRecords, needSync, err := vaultService.ListRecords(
+		vaultAccess,
+	)
 	if err != nil {
 		dialog.ShowError(err, window)
-		vaultRecords = nil
+		allVaultRecords = nil
 	}
+
+	filteredVaultRecords := append(
+		[]entity.VaultRecord(nil),
+		allVaultRecords...,
+	)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
@@ -66,7 +75,26 @@ func NewRecordScreen(
 			return
 		}
 
-		vaultRecords = updatedVaultRecords
+		allVaultRecords = updatedVaultRecords
+
+		query := strings.ToLower(
+			strings.TrimSpace(search.Text),
+		)
+
+		filteredVaultRecords = filteredVaultRecords[:0]
+
+		for _, record := range allVaultRecords {
+			name := strings.ToLower(record.Name)
+			endpoint := strings.ToLower(record.Endpoint)
+
+			if strings.Contains(name, query) ||
+				strings.Contains(endpoint, query) {
+				filteredVaultRecords = append(
+					filteredVaultRecords,
+					record,
+				)
+			}
+		}
 
 		if syncButton != nil {
 			if newNeedSync {
@@ -77,6 +105,7 @@ func NewRecordScreen(
 		}
 
 		if entryList != nil {
+			entryList.UnselectAll()
 			entryList.Refresh()
 		}
 	}
@@ -124,7 +153,7 @@ func NewRecordScreen(
 			_, _, err = vaultService.Remote.SyncRecords(
 				vaultAccess.VaultID,
 				vaultFile,
-				vaultRecords,
+				allVaultRecords,
 			)
 			if err != nil {
 				syncButton.Enable()
@@ -142,7 +171,7 @@ func NewRecordScreen(
 
 	entryList = widget.NewList(
 		func() int {
-			return len(vaultRecords)
+			return len(filteredVaultRecords)
 		},
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
@@ -158,9 +187,9 @@ func NewRecordScreen(
 				Italic: true,
 			}
 
-			passwordButton := widget.NewButtonWithIcon(
+			copyButton := widget.NewButtonWithIcon(
 				"",
-				theme.VisibilityIcon(),
+				theme.ContentCopyIcon(),
 				nil,
 			)
 
@@ -168,7 +197,7 @@ func NewRecordScreen(
 				nil,
 				nil,
 				nil,
-				passwordButton,
+				copyButton,
 				password,
 			)
 
@@ -238,11 +267,11 @@ func NewRecordScreen(
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(vaultRecords) {
+			if id < 0 || id >= len(filteredVaultRecords) {
 				return
 			}
 
-			record := vaultRecords[id]
+			record := filteredVaultRecords[id]
 
 			row := obj.(*fyne.Container)
 
@@ -257,7 +286,7 @@ func NewRecordScreen(
 			name := nameCell.Objects[0].(*widget.Label)
 			endpoint := endpointCell.Objects[0].(*widget.Label)
 			password := passwordCell.Objects[0].(*widget.Label)
-			passwordButton := passwordCell.Objects[1].(*widget.Button)
+			copyButton := passwordCell.Objects[1].(*widget.Button)
 			expiredAt := expiredAtCell.Objects[0].(*widget.Label)
 
 			actions := actionCell.Objects[0].(*fyne.Container)
@@ -268,34 +297,17 @@ func NewRecordScreen(
 			name.SetText(record.Name)
 			endpoint.SetText(record.Endpoint)
 
-			// Setiap kali row di-recycle, password kembali hidden.
+			// Row bisa di-recycle oleh Fyne.
 			password.SetText(hiddenPassword)
 
-			// Password asli hanya disimpan di closure tombol ini.
-			actualPassword := record.Password
-			showPassword := false
+			copyButton.OnTapped = func() {
+				window.Clipboard().SetContent(record.Password)
 
-			passwordButton.SetIcon(
-				theme.VisibilityIcon(),
-			)
-
-			passwordButton.OnTapped = func() {
-				showPassword = !showPassword
-
-				if showPassword {
-					password.SetText(actualPassword)
-					passwordButton.SetIcon(
-						theme.VisibilityOffIcon(),
-					)
-				} else {
-					password.SetText(hiddenPassword)
-					passwordButton.SetIcon(
-						theme.VisibilityIcon(),
-					)
-				}
-
-				password.Refresh()
-				passwordButton.Refresh()
+				dialog.ShowInformation(
+					"Password Copied",
+					"Password berhasil disalin ke clipboard.",
+					window,
+				)
 			}
 
 			if record.ExpiredAt.IsZero() {
@@ -330,7 +342,9 @@ func NewRecordScreen(
 			deleteButton.OnTapped = func() {
 				dialog.ShowConfirm(
 					"Delete Record",
-					"Record \""+record.Name+"\" akan dihapus. Lanjutkan?",
+					"Record \""+
+						record.Name+
+						"\" akan dihapus. Lanjutkan?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -354,7 +368,7 @@ func NewRecordScreen(
 	)
 
 	newEntryButton := widget.NewButtonWithIcon(
-		"New Entry",
+		"New",
 		theme.ContentAddIcon(),
 		func() {
 			showRecordForm(
@@ -384,25 +398,60 @@ func NewRecordScreen(
 			syncButton,
 			newEntryButton,
 		),
-		nil,
-	)
-
-	entryHeader := container.NewVBox(
-		toolbar,
 		search,
 	)
 
 	content := container.NewBorder(
-		entryHeader,
+		toolbar,
 		nil,
 		nil,
 		nil,
 		entryList,
 	)
 
+	search.OnChanged = func(query string) {
+		if searchTimer != nil {
+			searchTimer.Stop()
+		}
+
+		searchTimer = time.AfterFunc(
+			200*time.Millisecond,
+			func() {
+				query = strings.ToLower(
+					strings.TrimSpace(query),
+				)
+
+				filtered := make(
+					[]entity.VaultRecord,
+					0,
+					len(allVaultRecords),
+				)
+
+				for _, record := range allVaultRecords {
+					name := strings.ToLower(record.Name)
+					endpoint := strings.ToLower(record.Endpoint)
+
+					if strings.Contains(name, query) ||
+						strings.Contains(endpoint, query) {
+						filtered = append(
+							filtered,
+							record,
+						)
+					}
+				}
+
+				fyne.Do(func() {
+					filteredVaultRecords = filtered
+
+					entryList.UnselectAll()
+					entryList.Refresh()
+				})
+			},
+		)
+	}
+
 	return &RecordScreen{
-		Content:      content,
-		vaultRecords: vaultRecords,
+		Content: content,
 	}
 }
 

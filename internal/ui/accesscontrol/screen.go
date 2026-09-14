@@ -1,6 +1,9 @@
 package accesscontrol
 
 import (
+	"strings"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -30,14 +33,21 @@ func New(
 		coreService.Auth,
 	)
 
+	var searchTimer *time.Timer
+
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search access controls...")
 
-	acl, err := acService.List()
+	allACL, err := acService.List()
 	if err != nil {
 		dialog.ShowError(err, window)
-		acl = nil
+		allACL = nil
 	}
+
+	filteredACL := append(
+		[]entity.Permission(nil),
+		allACL...,
+	)
 
 	var entryList *widget.List
 
@@ -48,16 +58,38 @@ func New(
 			return
 		}
 
-		acl = updatedACL
+		allACL = updatedACL
+
+		query := strings.ToLower(
+			strings.TrimSpace(search.Text),
+		)
+
+		filteredACL = filteredACL[:0]
+
+		for _, permission := range allACL {
+			name := strings.ToLower(permission.Name)
+			privilege := strings.ToLower(
+				string(permission.Privilege),
+			)
+
+			if strings.Contains(name, query) ||
+				strings.Contains(privilege, query) {
+				filteredACL = append(
+					filteredACL,
+					permission,
+				)
+			}
+		}
 
 		if entryList != nil {
+			entryList.UnselectAll()
 			entryList.Refresh()
 		}
 	}
 
 	entryList = widget.NewList(
 		func() int {
-			return len(acl)
+			return len(filteredACL)
 		},
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
@@ -112,11 +144,11 @@ func New(
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(acl) {
+			if id < 0 || id >= len(filteredACL) {
 				return
 			}
 
-			acData := acl[id]
+			acData := filteredACL[id]
 
 			row := obj.(*fyne.Container)
 
@@ -150,6 +182,7 @@ func New(
 								return
 							}
 						}
+
 						if updated.Privilege != selected.Privilege {
 							if err := acService.ChangePrivilege(
 								updated.ID,
@@ -168,7 +201,9 @@ func New(
 			deleteButton.OnTapped = func() {
 				dialog.ShowConfirm(
 					"Delete Access Control",
-					"Access control \""+acData.Name+"\" akan dihapus. Lanjutkan?",
+					"Access control \""+
+						acData.Name+
+						"\" akan dihapus. Lanjutkan?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -190,7 +225,7 @@ func New(
 	)
 
 	newEntryButton := widget.NewButtonWithIcon(
-		"New Entry",
+		"New",
 		theme.ContentAddIcon(),
 		func() {
 			showForm(
@@ -222,24 +257,18 @@ func New(
 		},
 	)
 
+	toolbar := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		newEntryButton,
+		search,
+	)
+
 	content := container.NewMax()
 
 	acContent := container.NewBorder(
-		container.NewBorder(
-			search,
-			nil,
-			nil,
-			container.NewHBox(
-				newEntryButton,
-			),
-			widget.NewLabelWithStyle(
-				"Access Control",
-				fyne.TextAlignLeading,
-				fyne.TextStyle{
-					Bold: true,
-				},
-			),
-		),
+		toolbar,
 		nil,
 		nil,
 		nil,
@@ -251,11 +280,11 @@ func New(
 	}
 
 	entryList.OnSelected = func(id widget.ListItemID) {
-		if id < 0 || id >= len(acl) {
+		if id < 0 || id >= len(filteredACL) {
 			return
 		}
 
-		selectedPermission := acl[id]
+		selectedPermission := filteredACL[id]
 
 		userScreen := NewUser(
 			window,
@@ -278,6 +307,52 @@ func New(
 		content.Refresh()
 
 		entryList.Unselect(id)
+	}
+
+	search.OnChanged = func(query string) {
+		if searchTimer != nil {
+			searchTimer.Stop()
+		}
+
+		searchTimer = time.AfterFunc(
+			200*time.Millisecond,
+			func() {
+				query = strings.ToLower(
+					strings.TrimSpace(query),
+				)
+
+				filtered := make(
+					[]entity.Permission,
+					0,
+					len(allACL),
+				)
+
+				for _, permission := range allACL {
+					name := strings.ToLower(
+						permission.Name,
+					)
+
+					privilege := strings.ToLower(
+						string(permission.Privilege),
+					)
+
+					if strings.Contains(name, query) ||
+						strings.Contains(privilege, query) {
+						filtered = append(
+							filtered,
+							permission,
+						)
+					}
+				}
+
+				fyne.Do(func() {
+					filteredACL = filtered
+
+					entryList.UnselectAll()
+					entryList.Refresh()
+				})
+			},
+		)
 	}
 
 	return &Screen{
@@ -313,9 +388,13 @@ func showForm(
 	privilegeRadio.Horizontal = false
 
 	if permission.Privilege.IsValid() {
-		privilegeRadio.SetSelected(string(permission.Privilege))
+		privilegeRadio.SetSelected(
+			string(permission.Privilege),
+		)
 	} else {
-		privilegeRadio.SetSelected(string(entity.PrivilegeRead))
+		privilegeRadio.SetSelected(
+			string(entity.PrivilegeRead),
+		)
 	}
 
 	form := widget.NewForm(
@@ -351,6 +430,7 @@ func showForm(
 			}
 
 			name := nameEntry.Text
+
 			if name == "" {
 				dialog.ShowInformation(
 					"Invalid Input",

@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/tacenva/replica-core/api"
 	"github.com/tacenva/replica-core/app"
 	"github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
@@ -28,6 +29,21 @@ func New(
 	sotService *sourceoftruth.Service,
 	onBack func(),
 ) *Screen {
+	appDeps.Client.SetToken(context.SelectedSoT.AuthToken)
+	appDeps.Client.ConfigureTLS(
+		context.SelectedSoT.Address,
+		api.TLSConfig{
+			Fingerprint: context.SelectedSoT.TLSFingerprint,
+
+			OnFirstTrust: func(
+				fingerprint string,
+			) error {
+				context.SelectedSoT.TLSFingerprint = fingerprint
+				return sotService.Update(context.SelectedSoT)
+			},
+		},
+	)
+
 	vaultScreen := vault.New(
 		window,
 		appDeps,

@@ -252,6 +252,8 @@ func New(
 			sotService,
 			func() {
 				window.SetContent(content)
+				appDeps.Client.ClearToken()
+				appDeps.Client.ClearTLS(selectedSot.Address)
 				list.Unselect(id)
 			},
 		)

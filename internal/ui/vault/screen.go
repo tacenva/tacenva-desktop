@@ -1,6 +1,9 @@
 package vault
 
 import (
+	"strings"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -36,14 +39,21 @@ func New(
 		sotService,
 	)
 
-	search := widget.NewEntry()
-	search.SetPlaceHolder("Search passwords...")
+	var searchTimer *time.Timer
 
-	vaultAccesses, needSync, err := vaultService.List()
+	search := widget.NewEntry()
+	search.SetPlaceHolder("Search collection...")
+
+	allVaultAccesses, needSync, err := vaultService.List()
 	if err != nil {
 		dialog.ShowError(err, window)
-		vaultAccesses = nil
+		allVaultAccesses = nil
 	}
+
+	filteredVaultAccesses := append(
+		[]entity.VaultAccess(nil),
+		allVaultAccesses...,
+	)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
@@ -55,7 +65,25 @@ func New(
 			return
 		}
 
-		vaultAccesses = updatedVaultAccesses
+		allVaultAccesses = updatedVaultAccesses
+
+		query := strings.ToLower(
+			strings.TrimSpace(search.Text),
+		)
+
+		filteredVaultAccesses = filteredVaultAccesses[:0]
+
+		for _, vaultAccess := range allVaultAccesses {
+			if strings.Contains(
+				strings.ToLower(vaultAccess.Vault.Name),
+				query,
+			) {
+				filteredVaultAccesses = append(
+					filteredVaultAccesses,
+					vaultAccess,
+				)
+			}
+		}
 
 		if syncButton != nil {
 			if newNeedSync {
@@ -66,6 +94,7 @@ func New(
 		}
 
 		if entryList != nil {
+			entryList.UnselectAll()
 			entryList.Refresh()
 		}
 	}
@@ -93,7 +122,7 @@ func New(
 
 	entryList = widget.NewList(
 		func() int {
-			return len(vaultAccesses)
+			return len(filteredVaultAccesses)
 		},
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
@@ -152,11 +181,11 @@ func New(
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(vaultAccesses) {
+			if id < 0 || id >= len(filteredVaultAccesses) {
 				return
 			}
 
-			vaultAccess := vaultAccesses[id]
+			vaultAccess := filteredVaultAccesses[id]
 
 			row := obj.(*fyne.Container)
 
@@ -200,7 +229,9 @@ func New(
 			deleteButton.OnTapped = func() {
 				dialog.ShowConfirm(
 					"Delete Vault",
-					"Vault \""+vaultAccess.Vault.Name+"\" akan dihapus. Lanjutkan?",
+					"Vault \""+
+						vaultAccess.Vault.Name+
+						"\" akan dihapus. Lanjutkan?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -223,7 +254,7 @@ func New(
 	)
 
 	newEntryButton := widget.NewButtonWithIcon(
-		"New Entry",
+		"New",
 		theme.ContentAddIcon(),
 		func() {
 			showForm(
@@ -244,27 +275,21 @@ func New(
 		},
 	)
 
-	// Content utama yang akan direplace ketika user masuk
-	// ke Vault Records.
+	toolbar := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		container.NewHBox(
+			syncButton,
+			newEntryButton,
+		),
+		search,
+	)
+
 	content := container.NewMax()
 
 	vaultContent := container.NewBorder(
-		container.NewBorder(
-			search,
-			nil,
-			nil,
-			container.NewHBox(
-				syncButton,
-				newEntryButton,
-			),
-			widget.NewLabelWithStyle(
-				"All Items",
-				fyne.TextAlignLeading,
-				fyne.TextStyle{
-					Bold: true,
-				},
-			),
-		),
+		toolbar,
 		nil,
 		nil,
 		nil,
@@ -276,11 +301,11 @@ func New(
 	}
 
 	entryList.OnSelected = func(id widget.ListItemID) {
-		if id < 0 || id >= len(vaultAccesses) {
+		if id < 0 || id >= len(filteredVaultAccesses) {
 			return
 		}
 
-		selectedVaultAccess := vaultAccesses[id]
+		selectedVaultAccess := filteredVaultAccesses[id]
 
 		recordScreen := NewRecordScreen(
 			window,
@@ -304,6 +329,48 @@ func New(
 		content.Refresh()
 
 		entryList.Unselect(id)
+	}
+
+	search.OnChanged = func(query string) {
+		if searchTimer != nil {
+			searchTimer.Stop()
+		}
+
+		searchTimer = time.AfterFunc(
+			200*time.Millisecond,
+			func() {
+				query = strings.ToLower(
+					strings.TrimSpace(query),
+				)
+
+				filtered := make(
+					[]entity.VaultAccess,
+					0,
+					len(allVaultAccesses),
+				)
+
+				for _, vaultAccess := range allVaultAccesses {
+					if strings.Contains(
+						strings.ToLower(
+							vaultAccess.Vault.Name,
+						),
+						query,
+					) {
+						filtered = append(
+							filtered,
+							vaultAccess,
+						)
+					}
+				}
+
+				fyne.Do(func() {
+					filteredVaultAccesses = filtered
+
+					entryList.UnselectAll()
+					entryList.Refresh()
+				})
+			},
+		)
 	}
 
 	return &Screen{

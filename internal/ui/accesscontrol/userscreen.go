@@ -1,6 +1,9 @@
 package accesscontrol
 
 import (
+	"strings"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -26,27 +29,56 @@ func NewUser(
 	selectedPermission *entity.Permission,
 	onBack func(),
 ) *UserScreen {
-	userList, err := acService.UserList(selectedPermission.ID)
-	if err != nil {
-		dialog.ShowError(err, window)
-		userList = nil
-	}
+	var searchTimer *time.Timer
 
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search users...")
 
+	allUsers, err := acService.UserList(selectedPermission.ID)
+	if err != nil {
+		dialog.ShowError(err, window)
+		allUsers = nil
+	}
+
+	filteredUsers := append(
+		[]entity.User(nil),
+		allUsers...,
+	)
+
 	var entryList *widget.List
 
 	reload := func() {
-		updatedUserList, err := acService.UserList(selectedPermission.ID)
+		updatedUsers, err := acService.UserList(
+			selectedPermission.ID,
+		)
 		if err != nil {
 			dialog.ShowError(err, window)
 			return
 		}
 
-		userList = updatedUserList
+		allUsers = updatedUsers
+
+		query := strings.ToLower(
+			strings.TrimSpace(search.Text),
+		)
+
+		filteredUsers = filteredUsers[:0]
+
+		for _, user := range allUsers {
+			hostname := strings.ToLower(user.Hostname)
+			status := strings.ToLower(string(user.Status))
+
+			if strings.Contains(hostname, query) ||
+				strings.Contains(status, query) {
+				filteredUsers = append(
+					filteredUsers,
+					user,
+				)
+			}
+		}
 
 		if entryList != nil {
+			entryList.UnselectAll()
 			entryList.Refresh()
 		}
 	}
@@ -59,7 +91,7 @@ func NewUser(
 
 	entryList = widget.NewList(
 		func() int {
-			return len(userList)
+			return len(filteredUsers)
 		},
 		func() fyne.CanvasObject {
 			hostname := widget.NewLabel("")
@@ -114,11 +146,11 @@ func NewUser(
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(userList) {
+			if id < 0 || id >= len(filteredUsers) {
 				return
 			}
 
-			userData := userList[id]
+			userData := filteredUsers[id]
 
 			row := obj.(*fyne.Container)
 
@@ -139,7 +171,9 @@ func NewUser(
 			approveButton.OnTapped = func() {
 				dialog.ShowConfirm(
 					"Approve User",
-					"User \""+userData.Hostname+"\" akan di-approve. Lanjutkan?",
+					"User \""+
+						userData.Hostname+
+						"\" akan di-approve. Lanjutkan?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -162,7 +196,9 @@ func NewUser(
 			revokeButton.OnTapped = func() {
 				dialog.ShowConfirm(
 					"Revoke User",
-					"User \""+userData.Hostname+"\" akan di-revoke. Lanjutkan?",
+					"User \""+
+						userData.Hostname+
+						"\" akan di-revoke. Lanjutkan?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -182,7 +218,6 @@ func NewUser(
 				)
 			}
 
-			// Atur tombol berdasarkan status user.
 			switch userData.Status {
 			case entity.UserStatusPending:
 				approveButton.Show()
@@ -205,43 +240,66 @@ func NewUser(
 		},
 	)
 
-	content := container.NewMax()
-
 	toolbar := container.NewBorder(
 		nil,
 		nil,
 		backButton,
 		nil,
-		nil,
-	)
-
-	entryHeader := container.NewVBox(
-		toolbar,
 		search,
 	)
 
-	userContent := container.NewBorder(
-		container.NewBorder(
-			entryHeader,
-			nil,
-			nil,
-			nil,
-			widget.NewLabelWithStyle(
-				"Users",
-				fyne.TextAlignLeading,
-				fyne.TextStyle{
-					Bold: true,
-				},
-			),
-		),
+	content := container.NewBorder(
+		toolbar,
 		nil,
 		nil,
 		nil,
 		entryList,
 	)
 
-	content.Objects = []fyne.CanvasObject{
-		userContent,
+	search.OnChanged = func(query string) {
+		if searchTimer != nil {
+			searchTimer.Stop()
+		}
+
+		searchTimer = time.AfterFunc(
+			200*time.Millisecond,
+			func() {
+				query = strings.ToLower(
+					strings.TrimSpace(query),
+				)
+
+				filtered := make(
+					[]entity.User,
+					0,
+					len(allUsers),
+				)
+
+				for _, user := range allUsers {
+					hostname := strings.ToLower(
+						user.Hostname,
+					)
+
+					status := strings.ToLower(
+						string(user.Status),
+					)
+
+					if strings.Contains(hostname, query) ||
+						strings.Contains(status, query) {
+						filtered = append(
+							filtered,
+							user,
+						)
+					}
+				}
+
+				fyne.Do(func() {
+					filteredUsers = filtered
+
+					entryList.UnselectAll()
+					entryList.Refresh()
+				})
+			},
+		)
 	}
 
 	return &UserScreen{
