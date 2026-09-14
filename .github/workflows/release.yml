@@ -14,13 +14,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     strategy:
+      fail-fast: true
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04
             goos: linux
             goarch: amd64
 
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-24.04
             goos: linux
             goarch: arm64
 
@@ -28,22 +29,31 @@ jobs:
             goos: darwin
             goarch: amd64
 
-          - runner: macos-latest
+          - runner: macos-14
             goos: darwin
             goarch: arm64
 
-          - runner: windows-latest
+          - runner: windows-2025
             goos: windows
             goarch: amd64
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Install Linux dependencies
         if: matrix.goos == 'linux'
         run: |
+          sudo dpkg --add-architecture arm64
+
           sudo apt-get update
+
           sudo apt-get install -y \
             pkg-config \
             libgl1-mesa-dev \
@@ -53,21 +63,34 @@ jobs:
             libxcursor-dev \
             libxrandr-dev \
             libxinerama-dev \
-            libxi-dev
+            libxi-dev \
+            libxkbcommon-dev
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Install Linux ARM64 cross compiler
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
+        run: |
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libgl1-mesa-dev:arm64 \
+            libegl1-mesa-dev:arm64 \
+            libwayland-dev:arm64 \
+            libx11-dev:arm64 \
+            libxcursor-dev:arm64 \
+            libxrandr-dev:arm64 \
+            libxinerama-dev:arm64 \
+            libxi-dev:arm64 \
+            libxkbcommon-dev:arm64
 
       - name: Test
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: go test ./...
 
       - name: Build
+        shell: bash
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        shell: bash
         run: |
           mkdir -p dist
 
@@ -77,11 +100,19 @@ jobs:
             NAME="${NAME}.exe"
           fi
 
+          if [ "$GOOS" = "linux" ] && [ "$GOARCH" = "arm64" ]; then
+            export CGO_ENABLED=1
+            export CC=aarch64-linux-gnu-gcc
+            export CXX=aarch64-linux-gnu-g++
+          elif [ "$GOOS" = "linux" ]; then
+            export CGO_ENABLED=1
+          fi
+
           go build \
             -trimpath \
             -ldflags="-s -w" \
             -o "dist/${NAME}" \
-            ./cmd/tacpass-desktop
+            ./cmd/tacenva
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -92,7 +123,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Download artifacts
