@@ -11,9 +11,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/database"
-	"github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/sourceoftruth"
-	"github.com/tacenva/replica-core/app/vault"
+	"github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/sourceoftruth"
+	"github.com/tacenva/tacenva-services/app/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/config"
 	"github.com/tacenva/tacpass-core/entity"
@@ -305,7 +305,7 @@ func NewRecordScreen(
 
 				dialog.ShowInformation(
 					"Password Copied",
-					"Password berhasil disalin ke clipboard.",
+					"Password copied to clipboard.",
 					window,
 				)
 			}
@@ -344,7 +344,7 @@ func NewRecordScreen(
 					"Delete Record",
 					"Record \""+
 						record.Name+
-						"\" akan dihapus. Lanjutkan?",
+						"\" will be deleted. Continue?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -553,7 +553,7 @@ func showRecordForm(
 			if name == "" || endpoint == "" || password == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
-					"Name, endpoint, dan password wajib diisi.",
+					"Name, endpoint, and password are required.",
 					window,
 				)
 				return

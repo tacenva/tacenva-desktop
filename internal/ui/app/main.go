@@ -6,12 +6,12 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/replica-core/api"
-	"github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
 	"github.com/tacenva/tacenva-desktop/internal/ui/setting"
 	"github.com/tacenva/tacenva-desktop/internal/ui/vault"
+	"github.com/tacenva/tacenva-services/api"
+	"github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	coreApp "github.com/tacenva/tacpass-core/app"
 )
 

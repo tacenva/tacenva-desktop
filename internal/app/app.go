@@ -6,9 +6,9 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
-	replicaCore "github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/tacenva-desktop/internal/ui/login"
+	replicaCore "github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	coreapp "github.com/tacenva/tacpass-core/app"
 )
 

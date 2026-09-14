@@ -10,9 +10,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/sourceoftruth"
-	"github.com/tacenva/replica-core/app/vault"
+	"github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/sourceoftruth"
+	"github.com/tacenva/tacenva-services/app/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/entity"
 )
@@ -231,7 +231,7 @@ func New(
 					"Delete Vault",
 					"Vault \""+
 						vaultAccess.Vault.Name+
-						"\" akan dihapus. Lanjutkan?",
+						"\" will be deleted. Continue?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -427,7 +427,7 @@ func showForm(
 			if name == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
-					"Name wajib diisi.",
+					"Name is required.",
 					window,
 				)
 				return

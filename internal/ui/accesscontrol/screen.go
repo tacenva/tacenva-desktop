@@ -10,8 +10,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/accesscontrol"
+	"github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/entity"
 )
@@ -36,7 +36,7 @@ func New(
 	var searchTimer *time.Timer
 
 	search := widget.NewEntry()
-	search.SetPlaceHolder("Search access controls...")
+	search.SetPlaceHolder("Search permissions...")
 
 	allACL, err := acService.List()
 	if err != nil {
@@ -203,7 +203,7 @@ func New(
 					"Delete Access Control",
 					"Access control \""+
 						acData.Name+
-						"\" akan dihapus. Lanjutkan?",
+						"\" will be deleted. Continue?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -434,7 +434,7 @@ func showForm(
 			if name == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
-					"Name wajib diisi.",
+					"Name is required.",
 					window,
 				)
 				return
@@ -443,7 +443,7 @@ func showForm(
 			if privilegeRadio.Selected == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
-					"Privilege wajib dipilih.",
+					"Privilege is required.",
 					window,
 				)
 				return
@@ -495,7 +495,7 @@ func showKeyPair(
 		privateKeyEntry,
 
 		widget.NewLabel(
-			"Private Key hanya ditampilkan sekarang. Simpan dengan aman sebelum menutup dialog.",
+			"The private key is only displayed now. Save it securely before closing this dialog.",
 		),
 	)
 

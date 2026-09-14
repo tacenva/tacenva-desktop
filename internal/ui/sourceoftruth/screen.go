@@ -9,10 +9,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/database"
-	rCoreApp "github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/sourceoftruth"
-	"github.com/tacenva/replica-core/entity"
 	"github.com/tacenva/tacenva-desktop/internal/ui/app"
+	rCoreApp "github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/sourceoftruth"
+	"github.com/tacenva/tacenva-services/entity"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/config"
 	"github.com/tacenva/tacpass-core/util/keyring"
@@ -44,7 +44,7 @@ func New(
 	)
 
 	subtitle := widget.NewLabel(
-		"Pilih source of truth yang ingin dibuka.",
+		"Choose node",
 	)
 
 	headerContent := container.NewVBox(

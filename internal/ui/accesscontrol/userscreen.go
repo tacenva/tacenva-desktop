@@ -10,8 +10,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/replica-core/app"
-	"github.com/tacenva/replica-core/app/accesscontrol"
+	"github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/entity"
 )
@@ -173,7 +173,7 @@ func NewUser(
 					"Approve User",
 					"User \""+
 						userData.Hostname+
-						"\" akan di-approve. Lanjutkan?",
+						"\" will be approved. Continue?",
 					func(ok bool) {
 						if !ok {
 							return
@@ -198,7 +198,7 @@ func NewUser(
 					"Revoke User",
 					"User \""+
 						userData.Hostname+
-						"\" akan di-revoke. Lanjutkan?",
+						"\" will be revoked. Continue?",
 					func(ok bool) {
 						if !ok {
 							return

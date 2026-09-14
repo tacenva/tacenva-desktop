@@ -4,9 +4,9 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
-	"github.com/tacenva/replica-core/app"
-	rCoreSot "github.com/tacenva/replica-core/app/sourceoftruth"
 	"github.com/tacenva/tacenva-desktop/internal/ui/sourceoftruth"
+	"github.com/tacenva/tacenva-services/app"
+	rCoreSot "github.com/tacenva/tacenva-services/app/sourceoftruth"
 	coreApp "github.com/tacenva/tacpass-core/app"
 )
 
@@ -29,8 +29,10 @@ func New(
 		},
 	)
 
-	subtitle := widget.NewLabel(
-		"Masukkan master password untuk membuka Tacenva.",
+	subtitle := widget.NewLabelWithStyle(
+		"Enter your master password to unlock.",
+		fyne.TextAlignCenter,
+		fyne.TextStyle{},
 	)
 
 	password := widget.NewPasswordEntry()
@@ -39,10 +41,12 @@ func New(
 	errorLabel := widget.NewLabel("")
 	errorLabel.Alignment = fyne.TextAlignCenter
 
-	unlockButton := widget.NewButton("Unlock", func() {
+	unlock := func() {
 		err := sotService.Access(password.Text)
 		if err != nil {
 			errorLabel.SetText(err.Error())
+			password.SetText("")
+			password.FocusGained()
 			return
 		}
 
@@ -54,7 +58,12 @@ func New(
 			sotService,
 		)
 		window.SetContent(sotScreen.Content)
-	})
+	}
+
+	unlockButton := widget.NewButton("Unlock", unlock)
+	password.OnSubmitted = func(_ string) {
+		unlock()
+	}
 
 	form := container.NewVBox(
 		title,
