@@ -8,6 +8,7 @@ import (
 
 	"github.com/tacenva/replica-core/app"
 	"github.com/tacenva/replica-core/app/sourceoftruth"
+	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
 	"github.com/tacenva/tacenva-desktop/internal/ui/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
 )
@@ -33,6 +34,13 @@ func New(
 		masterKey,
 		coreService,
 		sotService,
+	)
+
+	acScreen := accesscontrol.New(
+		window,
+		appDeps,
+		context,
+		coreService,
 	)
 
 	title := widget.NewLabelWithStyle(
@@ -67,7 +75,9 @@ func New(
 			mainContent.Refresh()
 		},
 		func() {
-			mainContent.Objects = []fyne.CanvasObject{}
+			mainContent.Objects = []fyne.CanvasObject{
+				acScreen.Content,
+			}
 			mainContent.Refresh()
 		},
 		func() {

@@ -12,12 +12,12 @@ import (
 	coreapp "github.com/tacenva/tacpass-core/app"
 )
 
-func Run() {
+func Run(dev bool) {
 	a := app.NewWithID("com.tacenva.password")
 
 	window := a.NewWindow("Tacenva Password")
 	window.Resize(fyne.NewSize(1000, 650))
-	appDeps, err := replicaCore.Setup(true)
+	appDeps, err := replicaCore.Setup(dev)
 	if err != nil {
 		fmt.Print(err)
 		return
