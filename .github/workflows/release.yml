@@ -11,25 +11,49 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
         include:
-          - goos: linux
+          - runner: ubuntu-latest
+            goos: linux
             goarch: amd64
-          - goos: linux
+
+          - runner: ubuntu-24.04-arm
+            goos: linux
             goarch: arm64
-          - goos: darwin
+
+          - runner: macos-13
+            goos: darwin
             goarch: amd64
-          - goos: darwin
+
+          - runner: macos-latest
+            goos: darwin
             goarch: arm64
-          - goos: windows
+
+          - runner: windows-latest
+            goos: windows
             goarch: amd64
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxi-dev
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -43,6 +67,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+        shell: bash
         run: |
           mkdir -p dist
 
