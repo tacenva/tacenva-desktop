@@ -87,9 +87,15 @@ jobs:
             export CGO_ENABLED=1
           fi
 
+          LDFLAGS="-s -w"
+
+          if [ "$GOOS" = "windows" ]; then
+            LDFLAGS="$LDFLAGS -H=windowsgui"
+          fi
+
           go build \
             -trimpath \
-            -ldflags="-s -w" \
+            -ldflags="$LDFLAGS" \
             -o "dist/${NAME}" \
             ./cmd/tacenva
 
