@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
@@ -34,53 +35,88 @@ func NewUser(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search users...")
 
-	allUsers, err := acService.UserList(selectedPermission.ID)
-	if err != nil {
-		dialog.ShowError(err, window)
-		allUsers = nil
-	}
-
-	filteredUsers := append(
-		[]entity.User(nil),
-		allUsers...,
-	)
+	allUsers := make([]entity.User, 0)
+	filteredUsers := make([]entity.User, 0)
 
 	var entryList *widget.List
 
-	reload := func() {
-		updatedUsers, err := acService.UserList(
-			selectedPermission.ID,
+	content := container.NewMax()
+
+	loadingView := loading.New(
+		"Loading users...",
+	)
+
+	filterUsers := func(
+		users []entity.User,
+		query string,
+	) []entity.User {
+		query = strings.ToLower(
+			strings.TrimSpace(query),
 		)
-		if err != nil {
-			dialog.ShowError(err, window)
-			return
+
+		if query == "" {
+			return append(
+				[]entity.User(nil),
+				users...,
+			)
 		}
 
-		allUsers = updatedUsers
-
-		query := strings.ToLower(
-			strings.TrimSpace(search.Text),
+		filtered := make(
+			[]entity.User,
+			0,
+			len(users),
 		)
 
-		filteredUsers = filteredUsers[:0]
+		for _, user := range users {
+			hostname := strings.ToLower(
+				user.Hostname,
+			)
 
-		for _, user := range allUsers {
-			hostname := strings.ToLower(user.Hostname)
-			status := strings.ToLower(string(user.Status))
+			status := strings.ToLower(
+				string(user.Status),
+			)
 
 			if strings.Contains(hostname, query) ||
 				strings.Contains(status, query) {
-				filteredUsers = append(
-					filteredUsers,
+				filtered = append(
+					filtered,
 					user,
 				)
 			}
 		}
 
-		if entryList != nil {
-			entryList.UnselectAll()
-			entryList.Refresh()
-		}
+		return filtered
+	}
+
+	reload := func() {
+		go func() {
+			updatedUsers, err := acService.UserList(
+				selectedPermission.ID,
+			)
+
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(
+						err,
+						window,
+					)
+
+					return
+				}
+
+				allUsers = updatedUsers
+
+				filteredUsers = filterUsers(
+					allUsers,
+					search.Text,
+				)
+
+				if entryList != nil {
+					entryList.UnselectAll()
+					entryList.Refresh()
+				}
+			})
+		}()
 	}
 
 	backButton := widget.NewButtonWithIcon(
@@ -165,8 +201,13 @@ func NewUser(
 			approveButton := actions.Objects[0].(*widget.Button)
 			revokeButton := actions.Objects[1].(*widget.Button)
 
-			hostname.SetText(userData.Hostname)
-			status.SetText(string(userData.Status))
+			hostname.SetText(
+				userData.Hostname,
+			)
+
+			status.SetText(
+				string(userData.Status),
+			)
 
 			approveButton.OnTapped = func() {
 				dialog.ShowConfirm(
@@ -179,15 +220,36 @@ func NewUser(
 							return
 						}
 
-						_, err := acService.ApproveUser(
-							userData.ID,
-						)
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						approveButton.Disable()
+						revokeButton.Disable()
 
-						reload()
+						go func() {
+							_, err := acService.ApproveUser(
+								userData.ID,
+							)
+
+							fyne.Do(func() {
+								approveButton.Enable()
+								revokeButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"User berhasil di-approve.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 					window,
 				)
@@ -204,15 +266,36 @@ func NewUser(
 							return
 						}
 
-						_, err := acService.RevokeUser(
-							userData.ID,
-						)
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						approveButton.Disable()
+						revokeButton.Disable()
 
-						reload()
+						go func() {
+							_, err := acService.RevokeUser(
+								userData.ID,
+							)
+
+							fyne.Do(func() {
+								approveButton.Enable()
+								revokeButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"User berhasil di-revoke.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 					window,
 				)
@@ -248,7 +331,7 @@ func NewUser(
 		search,
 	)
 
-	content := container.NewBorder(
+	userContent := container.NewBorder(
 		toolbar,
 		nil,
 		nil,
@@ -264,33 +347,10 @@ func NewUser(
 		searchTimer = time.AfterFunc(
 			200*time.Millisecond,
 			func() {
-				query = strings.ToLower(
-					strings.TrimSpace(query),
+				filtered := filterUsers(
+					allUsers,
+					query,
 				)
-
-				filtered := make(
-					[]entity.User,
-					0,
-					len(allUsers),
-				)
-
-				for _, user := range allUsers {
-					hostname := strings.ToLower(
-						user.Hostname,
-					)
-
-					status := strings.ToLower(
-						string(user.Status),
-					)
-
-					if strings.Contains(hostname, query) ||
-						strings.Contains(status, query) {
-						filtered = append(
-							filtered,
-							user,
-						)
-					}
-				}
 
 				fyne.Do(func() {
 					filteredUsers = filtered
@@ -301,6 +361,46 @@ func NewUser(
 			},
 		)
 	}
+
+	// Tampilkan loading terlebih dahulu.
+	content.Objects = []fyne.CanvasObject{
+		loadingView.Content,
+	}
+
+	// Jalankan UserList() di background.
+	go func() {
+		updatedUsers, err := acService.UserList(
+			selectedPermission.ID,
+		)
+
+		fyne.Do(func() {
+			if err != nil {
+				loadingView.ShowError(
+					"Failed to load users.",
+				)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
+				return
+			}
+
+			allUsers = updatedUsers
+
+			filteredUsers = filterUsers(
+				allUsers,
+				search.Text,
+			)
+
+			entryList.Refresh()
+
+			loadingView.Show(
+				userContent,
+			)
+		})
+	}()
 
 	return &UserScreen{
 		Content: content,

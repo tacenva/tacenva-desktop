@@ -251,14 +251,21 @@ func New(
 			coreServices,
 			sotService,
 			func() {
-				window.SetContent(content)
-				appDeps.Client.ClearToken()
-				appDeps.Client.ClearTLS(selectedSot.Address)
-				list.Unselect(id)
+				fyne.Do(func() {
+					window.SetContent(content)
+
+					appDeps.Client.ClearToken()
+					appDeps.Client.ClearTLS(selectedSot.Address)
+
+					list.Unselect(id)
+				})
 			},
 		)
 
-		window.SetContent(appScreen.Content)
+		fyne.Do(func() {
+			window.SetContent(appScreen.Content)
+			list.Unselect(id)
+		})
 	}
 
 	return &Screen{

@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
@@ -38,53 +39,86 @@ func New(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search permissions...")
 
-	allACL, err := acService.List()
-	if err != nil {
-		dialog.ShowError(err, window)
-		allACL = nil
-	}
-
-	filteredACL := append(
-		[]entity.Permission(nil),
-		allACL...,
-	)
+	allACL := make([]entity.Permission, 0)
+	filteredACL := make([]entity.Permission, 0)
 
 	var entryList *widget.List
 
-	reload := func() {
-		updatedACL, err := acService.List()
-		if err != nil {
-			dialog.ShowError(err, window)
-			return
-		}
+	content := container.NewMax()
 
-		allACL = updatedACL
+	loadingView := loading.New(
+		"Loading access controls...",
+	)
 
-		query := strings.ToLower(
-			strings.TrimSpace(search.Text),
+	filterACL := func(
+		permissions []entity.Permission,
+		query string,
+	) []entity.Permission {
+		query = strings.ToLower(
+			strings.TrimSpace(query),
 		)
 
-		filteredACL = filteredACL[:0]
+		if query == "" {
+			return append(
+				[]entity.Permission(nil),
+				permissions...,
+			)
+		}
 
-		for _, permission := range allACL {
-			name := strings.ToLower(permission.Name)
+		filtered := make(
+			[]entity.Permission,
+			0,
+			len(permissions),
+		)
+
+		for _, permission := range permissions {
+			name := strings.ToLower(
+				permission.Name,
+			)
+
 			privilege := strings.ToLower(
 				string(permission.Privilege),
 			)
 
 			if strings.Contains(name, query) ||
 				strings.Contains(privilege, query) {
-				filteredACL = append(
-					filteredACL,
+				filtered = append(
+					filtered,
 					permission,
 				)
 			}
 		}
 
-		if entryList != nil {
-			entryList.UnselectAll()
-			entryList.Refresh()
-		}
+		return filtered
+	}
+
+	reload := func() {
+		go func() {
+			updatedACL, err := acService.List()
+
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(
+						err,
+						window,
+					)
+
+					return
+				}
+
+				allACL = updatedACL
+
+				filteredACL = filterACL(
+					allACL,
+					search.Text,
+				)
+
+				if entryList != nil {
+					entryList.UnselectAll()
+					entryList.Refresh()
+				}
+			})
+		}()
 	}
 
 	entryList = widget.NewList(
@@ -164,7 +198,10 @@ func New(
 			deleteButton := actions.Objects[1].(*widget.Button)
 
 			name.SetText(acData.Name)
-			privilege.SetText(string(acData.Privilege))
+
+			privilege.SetText(
+				string(acData.Privilege),
+			)
 
 			editButton.OnTapped = func() {
 				selected := acData
@@ -173,27 +210,67 @@ func New(
 					window,
 					&selected,
 					func(updated *entity.Permission) {
-						if updated.Name != selected.Name {
-							if err := acService.ChangeName(
-								updated.ID,
-								updated.Name,
-							); err != nil {
-								dialog.ShowError(err, window)
-								return
-							}
-						}
+						editButton.Disable()
+						deleteButton.Disable()
 
-						if updated.Privilege != selected.Privilege {
-							if err := acService.ChangePrivilege(
-								updated.ID,
-								updated.Privilege,
-							); err != nil {
-								dialog.ShowError(err, window)
-								return
-							}
-						}
+						go func() {
+							var err error
 
-						reload()
+							if updated.Name != selected.Name {
+								err = acService.ChangeName(
+									updated.ID,
+									updated.Name,
+								)
+
+								if err != nil {
+									fyne.Do(func() {
+										editButton.Enable()
+										deleteButton.Enable()
+
+										dialog.ShowError(
+											err,
+											window,
+										)
+									})
+
+									return
+								}
+							}
+
+							if updated.Privilege != selected.Privilege {
+								err = acService.ChangePrivilege(
+									updated.ID,
+									updated.Privilege,
+								)
+
+								if err != nil {
+									fyne.Do(func() {
+										editButton.Enable()
+										deleteButton.Enable()
+
+										dialog.ShowError(
+											err,
+											window,
+										)
+									})
+
+									return
+								}
+							}
+
+							fyne.Do(func() {
+								editButton.Enable()
+								deleteButton.Enable()
+
+								dialog.ShowInformation(
+									"Success",
+									"Access control berhasil diperbarui.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 				)
 			}
@@ -209,14 +286,36 @@ func New(
 							return
 						}
 
-						if err := acService.DeleteAccessControl(
-							acData.ID,
-						); err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						editButton.Disable()
+						deleteButton.Disable()
 
-						reload()
+						go func() {
+							err := acService.DeleteAccessControl(
+								acData.ID,
+							)
+
+							fyne.Do(func() {
+								editButton.Enable()
+								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"Access control berhasil dihapus.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 					window,
 				)
@@ -224,7 +323,9 @@ func New(
 		},
 	)
 
-	newEntryButton := widget.NewButtonWithIcon(
+	var newEntryButton *widget.Button
+
+	newEntryButton = widget.NewButtonWithIcon(
 		"New",
 		theme.ContentAddIcon(),
 		func() {
@@ -232,26 +333,45 @@ func New(
 				window,
 				nil,
 				func(newPermission *entity.Permission) {
-					_, _, keyPair, err := acService.Create(
-						newPermission.Name,
-						newPermission.Privilege,
-					)
-					if err != nil {
-						dialog.ShowError(err, window)
-						return
-					}
+					newEntryButton.Disable()
 
-					reload()
+					go func() {
+						_, _, keyPair, err := acService.Create(
+							newPermission.Name,
+							newPermission.Privilege,
+						)
 
-					if keyPair == nil {
-						return
-					}
+						fyne.Do(func() {
+							newEntryButton.Enable()
 
-					showKeyPair(
-						window,
-						keyPair.PublicKey,
-						keyPair.PrivateKey,
-					)
+							if err != nil {
+								dialog.ShowError(
+									err,
+									window,
+								)
+
+								return
+							}
+
+							dialog.ShowInformation(
+								"Success",
+								"Access control berhasil dibuat.",
+								window,
+							)
+
+							reload()
+
+							if keyPair == nil {
+								return
+							}
+
+							showKeyPair(
+								window,
+								keyPair.PublicKey,
+								keyPair.PrivateKey,
+							)
+						})
+					}()
 				},
 			)
 		},
@@ -265,8 +385,6 @@ func New(
 		search,
 	)
 
-	content := container.NewMax()
-
 	acContent := container.NewBorder(
 		toolbar,
 		nil,
@@ -276,7 +394,7 @@ func New(
 	)
 
 	content.Objects = []fyne.CanvasObject{
-		acContent,
+		loadingView.Content,
 	}
 
 	entryList.OnSelected = func(id widget.ListItemID) {
@@ -297,6 +415,7 @@ func New(
 				content.Objects = []fyne.CanvasObject{
 					acContent,
 				}
+
 				content.Refresh()
 			},
 		)
@@ -304,6 +423,7 @@ func New(
 		content.Objects = []fyne.CanvasObject{
 			userScreen.Content,
 		}
+
 		content.Refresh()
 
 		entryList.Unselect(id)
@@ -317,33 +437,10 @@ func New(
 		searchTimer = time.AfterFunc(
 			200*time.Millisecond,
 			func() {
-				query = strings.ToLower(
-					strings.TrimSpace(query),
+				filtered := filterACL(
+					allACL,
+					query,
 				)
-
-				filtered := make(
-					[]entity.Permission,
-					0,
-					len(allACL),
-				)
-
-				for _, permission := range allACL {
-					name := strings.ToLower(
-						permission.Name,
-					)
-
-					privilege := strings.ToLower(
-						string(permission.Privilege),
-					)
-
-					if strings.Contains(name, query) ||
-						strings.Contains(privilege, query) {
-						filtered = append(
-							filtered,
-							permission,
-						)
-					}
-				}
 
 				fyne.Do(func() {
 					filteredACL = filtered
@@ -354,6 +451,44 @@ func New(
 			},
 		)
 	}
+
+	// Tampilkan loading terlebih dahulu.
+	content.Objects = []fyne.CanvasObject{
+		loadingView.Content,
+	}
+
+	// Jalankan List() di background.
+	go func() {
+		updatedACL, err := acService.List()
+
+		fyne.Do(func() {
+			if err != nil {
+				loadingView.ShowError(
+					"Failed to load access controls.",
+				)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
+				return
+			}
+
+			allACL = updatedACL
+
+			filteredACL = filterACL(
+				allACL,
+				search.Text,
+			)
+
+			entryList.Refresh()
+
+			loadingView.Show(
+				acContent,
+			)
+		})
+	}()
 
 	return &Screen{
 		Content: content,
@@ -437,6 +572,7 @@ func showForm(
 					"Name is required.",
 					window,
 				)
+
 				return
 			}
 
@@ -446,6 +582,7 @@ func showForm(
 					"Privilege is required.",
 					window,
 				)
+
 				return
 			}
 

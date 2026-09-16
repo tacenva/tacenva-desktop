@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/app/vault"
@@ -44,59 +45,97 @@ func New(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search collection...")
 
-	allVaultAccesses, needSync, err := vaultService.List()
-	if err != nil {
-		dialog.ShowError(err, window)
-		allVaultAccesses = nil
-	}
-
-	filteredVaultAccesses := append(
-		[]entity.VaultAccess(nil),
-		allVaultAccesses...,
-	)
+	allVaultAccesses := make([]entity.VaultAccess, 0)
+	filteredVaultAccesses := make([]entity.VaultAccess, 0)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
 
-	reload := func() {
-		updatedVaultAccesses, newNeedSync, err := vaultService.List()
-		if err != nil {
-			dialog.ShowError(err, window)
-			return
-		}
+	content := container.NewMax()
 
-		allVaultAccesses = updatedVaultAccesses
+	loadingView := loading.New(
+		"Loading collections...",
+	)
 
-		query := strings.ToLower(
-			strings.TrimSpace(search.Text),
+	filterVaultAccesses := func(
+		accesses []entity.VaultAccess,
+		query string,
+	) []entity.VaultAccess {
+		query = strings.ToLower(
+			strings.TrimSpace(query),
 		)
 
-		filteredVaultAccesses = filteredVaultAccesses[:0]
+		if query == "" {
+			return append(
+				[]entity.VaultAccess(nil),
+				accesses...,
+			)
+		}
 
-		for _, vaultAccess := range allVaultAccesses {
+		filtered := make(
+			[]entity.VaultAccess,
+			0,
+			len(accesses),
+		)
+
+		for _, vaultAccess := range accesses {
 			if strings.Contains(
-				strings.ToLower(vaultAccess.Vault.Name),
+				strings.ToLower(
+					vaultAccess.Vault.Name,
+				),
 				query,
 			) {
-				filteredVaultAccesses = append(
-					filteredVaultAccesses,
+				filtered = append(
+					filtered,
 					vaultAccess,
 				)
 			}
 		}
 
+		return filtered
+	}
+
+	reload := func() {
 		if syncButton != nil {
-			if newNeedSync {
-				syncButton.Enable()
-			} else {
-				syncButton.Disable()
-			}
+			syncButton.Disable()
 		}
 
-		if entryList != nil {
-			entryList.UnselectAll()
-			entryList.Refresh()
-		}
+		go func() {
+			updatedVaultAccesses, newNeedSync, err := vaultService.List()
+
+			fyne.Do(func() {
+				if err != nil {
+					if syncButton != nil {
+						syncButton.Enable()
+					}
+
+					dialog.ShowError(
+						err,
+						window,
+					)
+
+					return
+				}
+
+				allVaultAccesses = updatedVaultAccesses
+
+				filteredVaultAccesses = filterVaultAccesses(
+					allVaultAccesses,
+					search.Text,
+				)
+
+				if newNeedSync {
+					syncButton.Enable()
+				} else {
+					syncButton.Disable()
+				}
+
+				if entryList != nil {
+					entryList.UnselectAll()
+					entryList.Refresh()
+				}
+			})
+		}()
 	}
 
 	syncButton = widget.NewButtonWithIcon(
@@ -108,17 +147,18 @@ func New(
 			_, err := vaultService.Remote.Sync()
 			if err != nil {
 				syncButton.Enable()
-				dialog.ShowError(err, window)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
 				return
 			}
 
 			reload()
 		},
 	)
-
-	if !needSync {
-		syncButton.Disable()
-	}
 
 	entryList = widget.NewList(
 		func() int {
@@ -200,7 +240,9 @@ func New(
 			updateButton := actions.Objects[0].(*widget.Button)
 			deleteButton := actions.Objects[1].(*widget.Button)
 
-			name.SetText(vaultAccess.Vault.Name)
+			name.SetText(
+				vaultAccess.Vault.Name,
+			)
 
 			updatedAt.SetText(
 				vaultAccess.Vault.UpdatedAt.Format(
@@ -215,13 +257,36 @@ func New(
 					window,
 					&selectedVault,
 					func(updated *entity.Vault) {
-						err := vaultService.UpdateVault(updated)
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						updateButton.Disable()
+						deleteButton.Disable()
 
-						reload()
+						go func() {
+							err := vaultService.UpdateVault(
+								updated,
+							)
+
+							fyne.Do(func() {
+								updateButton.Enable()
+								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"Vault berhasil diperbarui.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 				)
 			}
@@ -237,15 +302,36 @@ func New(
 							return
 						}
 
-						err := vaultService.DeleteVault(
-							&vaultAccess.Vault,
-						)
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						updateButton.Disable()
+						deleteButton.Disable()
 
-						reload()
+						go func() {
+							err := vaultService.DeleteVault(
+								&vaultAccess.Vault,
+							)
+
+							fyne.Do(func() {
+								updateButton.Enable()
+								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"Vault berhasil dihapus.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 					window,
 				)
@@ -253,7 +339,9 @@ func New(
 		},
 	)
 
-	newEntryButton := widget.NewButtonWithIcon(
+	var newEntryButton *widget.Button
+
+	newEntryButton = widget.NewButtonWithIcon(
 		"New",
 		theme.ContentAddIcon(),
 		func() {
@@ -261,15 +349,34 @@ func New(
 				window,
 				nil,
 				func(newVault *entity.Vault) {
-					_, err := vaultService.CreateVault(
-						newVault.Name,
-					)
-					if err != nil {
-						dialog.ShowError(err, window)
-						return
-					}
+					newEntryButton.Disable()
 
-					reload()
+					go func() {
+						_, err := vaultService.CreateVault(
+							newVault.Name,
+						)
+
+						fyne.Do(func() {
+							newEntryButton.Enable()
+
+							if err != nil {
+								dialog.ShowError(
+									err,
+									window,
+								)
+
+								return
+							}
+
+							dialog.ShowInformation(
+								"Success",
+								"Vault berhasil dibuat.",
+								window,
+							)
+
+							reload()
+						})
+					}()
 				},
 			)
 		},
@@ -286,8 +393,6 @@ func New(
 		search,
 	)
 
-	content := container.NewMax()
-
 	vaultContent := container.NewBorder(
 		toolbar,
 		nil,
@@ -295,10 +400,6 @@ func New(
 		nil,
 		entryList,
 	)
-
-	content.Objects = []fyne.CanvasObject{
-		vaultContent,
-	}
 
 	entryList.OnSelected = func(id widget.ListItemID) {
 		if id < 0 || id >= len(filteredVaultAccesses) {
@@ -319,6 +420,7 @@ func New(
 				content.Objects = []fyne.CanvasObject{
 					vaultContent,
 				}
+
 				content.Refresh()
 			},
 		)
@@ -326,6 +428,7 @@ func New(
 		content.Objects = []fyne.CanvasObject{
 			recordScreen.Content,
 		}
+
 		content.Refresh()
 
 		entryList.Unselect(id)
@@ -339,29 +442,10 @@ func New(
 		searchTimer = time.AfterFunc(
 			200*time.Millisecond,
 			func() {
-				query = strings.ToLower(
-					strings.TrimSpace(query),
+				filtered := filterVaultAccesses(
+					allVaultAccesses,
+					query,
 				)
-
-				filtered := make(
-					[]entity.VaultAccess,
-					0,
-					len(allVaultAccesses),
-				)
-
-				for _, vaultAccess := range allVaultAccesses {
-					if strings.Contains(
-						strings.ToLower(
-							vaultAccess.Vault.Name,
-						),
-						query,
-					) {
-						filtered = append(
-							filtered,
-							vaultAccess,
-						)
-					}
-				}
 
 				fyne.Do(func() {
 					filteredVaultAccesses = filtered
@@ -372,6 +456,50 @@ func New(
 			},
 		)
 	}
+
+	// Tampilkan loading terlebih dahulu.
+	content.Objects = []fyne.CanvasObject{
+		loadingView.Content,
+	}
+
+	// Jalankan List() di background.
+	go func() {
+		updatedVaultAccesses, needSync, err := vaultService.List()
+
+		fyne.Do(func() {
+			if err != nil {
+				loadingView.ShowError(
+					"Failed to load collections.",
+				)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
+				return
+			}
+
+			allVaultAccesses = updatedVaultAccesses
+
+			filteredVaultAccesses = filterVaultAccesses(
+				allVaultAccesses,
+				search.Text,
+			)
+
+			if needSync {
+				syncButton.Enable()
+			} else {
+				syncButton.Disable()
+			}
+
+			entryList.Refresh()
+
+			loadingView.Show(
+				vaultContent,
+			)
+		})
+	}()
 
 	return &Screen{
 		Content: content,
@@ -430,6 +558,7 @@ func showForm(
 					"Name is required.",
 					window,
 				)
+
 				return
 			}
 

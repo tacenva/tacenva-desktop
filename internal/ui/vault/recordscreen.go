@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/database"
+	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/app/vault"
@@ -50,64 +51,99 @@ func NewRecordScreen(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search passwords...")
 
-	allVaultRecords, needSync, err := vaultService.ListRecords(
-		vaultAccess,
-	)
-	if err != nil {
-		dialog.ShowError(err, window)
-		allVaultRecords = nil
-	}
-
-	filteredVaultRecords := append(
-		[]entity.VaultRecord(nil),
-		allVaultRecords...,
-	)
+	allVaultRecords := make([]entity.VaultRecord, 0)
+	filteredVaultRecords := make([]entity.VaultRecord, 0)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
 
-	reload := func() {
-		updatedVaultRecords, newNeedSync, err := vaultService.ListRecords(
-			vaultAccess,
+	content := container.NewMax()
+
+	loadingView := loading.New(
+		"Loading passwords...",
+	)
+
+	filterVaultRecords := func(
+		records []entity.VaultRecord,
+		query string,
+	) []entity.VaultRecord {
+		query = strings.ToLower(
+			strings.TrimSpace(query),
 		)
-		if err != nil {
-			dialog.ShowError(err, window)
-			return
+
+		if query == "" {
+			return append(
+				[]entity.VaultRecord(nil),
+				records...,
+			)
 		}
 
-		allVaultRecords = updatedVaultRecords
-
-		query := strings.ToLower(
-			strings.TrimSpace(search.Text),
+		filtered := make(
+			[]entity.VaultRecord,
+			0,
+			len(records),
 		)
 
-		filteredVaultRecords = filteredVaultRecords[:0]
-
-		for _, record := range allVaultRecords {
+		for _, record := range records {
 			name := strings.ToLower(record.Name)
 			endpoint := strings.ToLower(record.Endpoint)
 
 			if strings.Contains(name, query) ||
 				strings.Contains(endpoint, query) {
-				filteredVaultRecords = append(
-					filteredVaultRecords,
+				filtered = append(
+					filtered,
 					record,
 				)
 			}
 		}
 
+		return filtered
+	}
+
+	reload := func() {
 		if syncButton != nil {
-			if newNeedSync {
-				syncButton.Enable()
-			} else {
-				syncButton.Disable()
-			}
+			syncButton.Disable()
 		}
 
-		if entryList != nil {
-			entryList.UnselectAll()
-			entryList.Refresh()
-		}
+		go func() {
+			updatedVaultRecords, newNeedSync, err :=
+				vaultService.ListRecords(vaultAccess)
+
+			fyne.Do(func() {
+				if err != nil {
+					if syncButton != nil {
+						syncButton.Enable()
+					}
+
+					dialog.ShowError(
+						err,
+						window,
+					)
+
+					return
+				}
+
+				allVaultRecords = updatedVaultRecords
+
+				filteredVaultRecords = filterVaultRecords(
+					allVaultRecords,
+					search.Text,
+				)
+
+				if syncButton != nil {
+					if newNeedSync {
+						syncButton.Enable()
+					} else {
+						syncButton.Disable()
+					}
+				}
+
+				if entryList != nil {
+					entryList.UnselectAll()
+					entryList.Refresh()
+				}
+			})
+		}()
 	}
 
 	backButton := widget.NewButtonWithIcon(
@@ -135,7 +171,12 @@ func NewRecordScreen(
 			)
 			if err != nil {
 				syncButton.Enable()
-				dialog.ShowError(err, window)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
 				return
 			}
 
@@ -146,7 +187,12 @@ func NewRecordScreen(
 			)
 			if err != nil {
 				syncButton.Enable()
-				dialog.ShowError(err, window)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
 				return
 			}
 
@@ -157,17 +203,18 @@ func NewRecordScreen(
 			)
 			if err != nil {
 				syncButton.Enable()
-				dialog.ShowError(err, window)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
 				return
 			}
 
 			reload()
 		},
 	)
-
-	if !needSync {
-		syncButton.Disable()
-	}
 
 	entryList = widget.NewList(
 		func() int {
@@ -301,7 +348,9 @@ func NewRecordScreen(
 			password.SetText(hiddenPassword)
 
 			copyButton.OnTapped = func() {
-				window.Clipboard().SetContent(record.Password)
+				window.Clipboard().SetContent(
+					record.Password,
+				)
 
 				dialog.ShowInformation(
 					"Password Copied",
@@ -314,7 +363,9 @@ func NewRecordScreen(
 				expiredAt.SetText("-")
 			} else {
 				expiredAt.SetText(
-					record.ExpiredAt.Format("02 Jan 2006"),
+					record.ExpiredAt.Format(
+						"02 Jan 2006",
+					),
 				)
 			}
 
@@ -325,16 +376,37 @@ func NewRecordScreen(
 					window,
 					&selectedRecord,
 					func(updated *entity.VaultRecord) {
-						_, err := vaultService.UpdateRecord(
-							vaultAccess,
-							updated,
-						)
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						updateButton.Disable()
+						deleteButton.Disable()
 
-						reload()
+						go func() {
+							_, err := vaultService.UpdateRecord(
+								vaultAccess,
+								updated,
+							)
+
+							fyne.Do(func() {
+								updateButton.Enable()
+								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"Record berhasil diperbarui.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 				)
 			}
@@ -350,16 +422,37 @@ func NewRecordScreen(
 							return
 						}
 
-						err := vaultService.DeleteRecord(
-							vaultAccess,
-							&record,
-						)
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
+						updateButton.Disable()
+						deleteButton.Disable()
 
-						reload()
+						go func() {
+							err := vaultService.DeleteRecord(
+								vaultAccess,
+								&record,
+							)
+
+							fyne.Do(func() {
+								updateButton.Enable()
+								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(
+										err,
+										window,
+									)
+
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									"Record berhasil dihapus.",
+									window,
+								)
+
+								reload()
+							})
+						}()
 					},
 					window,
 				)
@@ -367,7 +460,9 @@ func NewRecordScreen(
 		},
 	)
 
-	newEntryButton := widget.NewButtonWithIcon(
+	var newEntryButton *widget.Button
+
+	newEntryButton = widget.NewButtonWithIcon(
 		"New",
 		theme.ContentAddIcon(),
 		func() {
@@ -375,16 +470,35 @@ func NewRecordScreen(
 				window,
 				nil,
 				func(newRecord *entity.VaultRecord) {
-					_, err := vaultService.AppendRecord(
-						vaultAccess,
-						newRecord,
-					)
-					if err != nil {
-						dialog.ShowError(err, window)
-						return
-					}
+					newEntryButton.Disable()
 
-					reload()
+					go func() {
+						_, err := vaultService.AppendRecord(
+							vaultAccess,
+							newRecord,
+						)
+
+						fyne.Do(func() {
+							newEntryButton.Enable()
+
+							if err != nil {
+								dialog.ShowError(
+									err,
+									window,
+								)
+
+								return
+							}
+
+							dialog.ShowInformation(
+								"Success",
+								"Record berhasil dibuat.",
+								window,
+							)
+
+							reload()
+						})
+					}()
 				},
 			)
 		},
@@ -401,7 +515,7 @@ func NewRecordScreen(
 		search,
 	)
 
-	content := container.NewBorder(
+	recordContent := container.NewBorder(
 		toolbar,
 		nil,
 		nil,
@@ -417,28 +531,10 @@ func NewRecordScreen(
 		searchTimer = time.AfterFunc(
 			200*time.Millisecond,
 			func() {
-				query = strings.ToLower(
-					strings.TrimSpace(query),
+				filtered := filterVaultRecords(
+					allVaultRecords,
+					query,
 				)
-
-				filtered := make(
-					[]entity.VaultRecord,
-					0,
-					len(allVaultRecords),
-				)
-
-				for _, record := range allVaultRecords {
-					name := strings.ToLower(record.Name)
-					endpoint := strings.ToLower(record.Endpoint)
-
-					if strings.Contains(name, query) ||
-						strings.Contains(endpoint, query) {
-						filtered = append(
-							filtered,
-							record,
-						)
-					}
-				}
 
 				fyne.Do(func() {
 					filteredVaultRecords = filtered
@@ -449,6 +545,51 @@ func NewRecordScreen(
 			},
 		)
 	}
+
+	// Tampilkan loading terlebih dahulu.
+	content.Objects = []fyne.CanvasObject{
+		loadingView.Content,
+	}
+
+	// Jalankan ListRecords() di background.
+	go func() {
+		updatedVaultRecords, needSync, err :=
+			vaultService.ListRecords(vaultAccess)
+
+		fyne.Do(func() {
+			if err != nil {
+				loadingView.ShowError(
+					"Failed to load passwords.",
+				)
+
+				dialog.ShowError(
+					err,
+					window,
+				)
+
+				return
+			}
+
+			allVaultRecords = updatedVaultRecords
+
+			filteredVaultRecords = filterVaultRecords(
+				allVaultRecords,
+				search.Text,
+			)
+
+			if needSync {
+				syncButton.Enable()
+			} else {
+				syncButton.Disable()
+			}
+
+			entryList.Refresh()
+
+			loadingView.Show(
+				recordContent,
+			)
+		})
+	}()
 
 	return &RecordScreen{
 		Content: content,
@@ -483,7 +624,11 @@ func showRecordForm(
 		func() {
 			password, err := credential.Generate(27)
 			if err != nil {
-				dialog.ShowError(err, window)
+				dialog.ShowError(
+					err,
+					window,
+				)
+
 				return
 			}
 
@@ -550,12 +695,15 @@ func showRecordForm(
 			endpoint := endpointEntry.Text
 			password := passwordEntry.Text
 
-			if name == "" || endpoint == "" || password == "" {
+			if name == "" ||
+				endpoint == "" ||
+				password == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
 					"Name, endpoint, and password are required.",
 					window,
 				)
+
 				return
 			}
 
