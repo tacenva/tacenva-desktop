@@ -31,7 +31,7 @@ func Run(dev bool) {
 	sotService := sourceoftruth.NewService(
 		appDeps,
 		services.Auth,
-		services.Permission,
+		services.AccessControl,
 	)
 	loginScreen := login.New(window, appDeps, services, sotService)
 	window.SetContent(loginScreen.Content)

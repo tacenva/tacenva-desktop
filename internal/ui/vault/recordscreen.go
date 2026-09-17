@@ -156,9 +156,8 @@ func NewRecordScreen(
 			syncButton.Disable()
 
 			go func() {
-				_, err := vaultService.Remote.SyncRecords(
-					vaultAccess.VaultID,
-				)
+				updatedVaultRecords, needSync, err :=
+					vaultService.ListRecords(vaultAccess)
 
 				fyne.Do(func() {
 					if err != nil {
@@ -172,13 +171,27 @@ func NewRecordScreen(
 						return
 					}
 
+					allVaultRecords = updatedVaultRecords
+
+					filteredVaultRecords = filterVaultRecords(
+						allVaultRecords,
+						search.Text,
+					)
+
+					entryList.UnselectAll()
+					entryList.Refresh()
+
+					if needSync {
+						syncButton.Enable()
+					} else {
+						syncButton.Disable()
+					}
+
 					dialog.ShowInformation(
 						"Success",
 						"Records berhasil disinkronkan.",
 						window,
 					)
-
-					reload()
 				})
 			}()
 		},
@@ -312,7 +325,6 @@ func NewRecordScreen(
 			name.SetText(record.Name)
 			endpoint.SetText(record.Endpoint)
 
-			// Row bisa di-recycle oleh Fyne.
 			password.SetText(hiddenPassword)
 
 			copyButton.OnTapped = func() {
