@@ -10,13 +10,11 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/app/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/config"
 	"github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/util/credential"
 )
@@ -101,19 +99,15 @@ func NewRecordScreen(
 	}
 
 	reload := func() {
-		if syncButton != nil {
-			syncButton.Disable()
-		}
+		syncButton.Disable()
 
 		go func() {
-			updatedVaultRecords, newNeedSync, err :=
+			updatedVaultRecords, needSync, err :=
 				vaultService.ListRecords(vaultAccess)
 
 			fyne.Do(func() {
-				if err != nil {
-					if syncButton != nil {
-						syncButton.Enable()
-					}
+				if updatedVaultRecords == nil && err != nil {
+					syncButton.Enable()
 
 					dialog.ShowError(
 						err,
@@ -130,17 +124,20 @@ func NewRecordScreen(
 					search.Text,
 				)
 
-				if syncButton != nil {
-					if newNeedSync {
-						syncButton.Enable()
-					} else {
-						syncButton.Disable()
-					}
+				if needSync {
+					syncButton.Enable()
+				} else {
+					syncButton.Disable()
 				}
 
-				if entryList != nil {
-					entryList.UnselectAll()
-					entryList.Refresh()
+				entryList.UnselectAll()
+				entryList.Refresh()
+
+				if err != nil {
+					dialog.ShowError(
+						err,
+						window,
+					)
 				}
 			})
 		}()
@@ -158,61 +155,32 @@ func NewRecordScreen(
 		func() {
 			syncButton.Disable()
 
-			vaultDB := database.New(
-				appDeps.Config.Path(
-					config.NodeDirName,
-					context.SelectedSoT.ID,
-					"vault",
-				),
-			)
-
-			vaultKey, err := context.SelectedSoT.KeyPair.Open(
-				vaultAccess.VaultKey,
-			)
-			if err != nil {
-				syncButton.Enable()
-
-				dialog.ShowError(
-					err,
-					window,
+			go func() {
+				_, err := vaultService.Remote.SyncRecords(
+					vaultAccess.VaultID,
 				)
 
-				return
-			}
+				fyne.Do(func() {
+					if err != nil {
+						syncButton.Enable()
 
-			vaultFile, err := vaultDB.File(
-				vaultAccess.VaultID,
-				string(vaultKey),
-				database.FileModeOpenOrCreate,
-			)
-			if err != nil {
-				syncButton.Enable()
+						dialog.ShowError(
+							err,
+							window,
+						)
 
-				dialog.ShowError(
-					err,
-					window,
-				)
+						return
+					}
 
-				return
-			}
+					dialog.ShowInformation(
+						"Success",
+						"Records berhasil disinkronkan.",
+						window,
+					)
 
-			_, _, err = vaultService.Remote.SyncRecords(
-				vaultAccess.VaultID,
-				vaultFile,
-				allVaultRecords,
-			)
-			if err != nil {
-				syncButton.Enable()
-
-				dialog.ShowError(
-					err,
-					window,
-				)
-
-				return
-			}
-
-			reload()
+					reload()
+				})
+			}()
 		},
 	)
 
@@ -546,18 +514,16 @@ func NewRecordScreen(
 		)
 	}
 
-	// Tampilkan loading terlebih dahulu.
 	content.Objects = []fyne.CanvasObject{
 		loadingView.Content,
 	}
 
-	// Jalankan ListRecords() di background.
 	go func() {
 		updatedVaultRecords, needSync, err :=
 			vaultService.ListRecords(vaultAccess)
 
 		fyne.Do(func() {
-			if err != nil {
+			if updatedVaultRecords == nil && err != nil {
 				loadingView.ShowError(
 					"Failed to load passwords.",
 				)
@@ -588,6 +554,13 @@ func NewRecordScreen(
 			loadingView.Show(
 				recordContent,
 			)
+
+			if err != nil {
+				dialog.ShowError(
+					err,
+					window,
+				)
+			}
 		})
 	}()
 

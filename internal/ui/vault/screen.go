@@ -20,7 +20,6 @@ import (
 
 type Screen struct {
 	Content fyne.CanvasObject
-	vault   []entity.Vault
 }
 
 func New(
@@ -96,18 +95,15 @@ func New(
 	}
 
 	reload := func() {
-		if syncButton != nil {
-			syncButton.Disable()
-		}
+		syncButton.Disable()
 
 		go func() {
-			updatedVaultAccesses, newNeedSync, err := vaultService.List()
+			updatedVaultAccesses, needSync, err :=
+				vaultService.List()
 
 			fyne.Do(func() {
-				if err != nil {
-					if syncButton != nil {
-						syncButton.Enable()
-					}
+				if err != nil && updatedVaultAccesses == nil {
+					syncButton.Enable()
 
 					dialog.ShowError(
 						err,
@@ -124,16 +120,14 @@ func New(
 					search.Text,
 				)
 
-				if newNeedSync {
+				if needSync {
 					syncButton.Enable()
 				} else {
 					syncButton.Disable()
 				}
 
-				if entryList != nil {
-					entryList.UnselectAll()
-					entryList.Refresh()
-				}
+				entryList.UnselectAll()
+				entryList.Refresh()
 			})
 		}()
 	}
@@ -464,10 +458,11 @@ func New(
 
 	// Jalankan List() di background.
 	go func() {
-		updatedVaultAccesses, needSync, err := vaultService.List()
+		updatedVaultAccesses, needSync, err :=
+			vaultService.List()
 
 		fyne.Do(func() {
-			if err != nil {
+			if err != nil && updatedVaultAccesses == nil {
 				loadingView.ShowError(
 					"Failed to load collections.",
 				)
