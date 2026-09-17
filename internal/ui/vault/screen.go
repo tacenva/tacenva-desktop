@@ -44,8 +44,15 @@ func New(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search collection...")
 
-	allVaultAccesses := make([]entity.VaultAccess, 0)
-	filteredVaultAccesses := make([]entity.VaultAccess, 0)
+	allVaultAccesses := make(
+		[]entity.VaultAccess,
+		0,
+	)
+
+	filteredVaultAccesses := make(
+		[]entity.VaultAccess,
+		0,
+	)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
@@ -94,6 +101,27 @@ func New(
 		return filtered
 	}
 
+	applyVaultAccesses := func(
+		vaultAccesses []entity.VaultAccess,
+		needSync bool,
+	) {
+		allVaultAccesses = vaultAccesses
+
+		filteredVaultAccesses = filterVaultAccesses(
+			allVaultAccesses,
+			search.Text,
+		)
+
+		if needSync {
+			syncButton.Enable()
+		} else {
+			syncButton.Disable()
+		}
+
+		entryList.UnselectAll()
+		entryList.Refresh()
+	}
+
 	reload := func() {
 		syncButton.Disable()
 
@@ -102,8 +130,22 @@ func New(
 				vaultService.List()
 
 			fyne.Do(func() {
-				if err != nil && updatedVaultAccesses == nil {
-					syncButton.Enable()
+				if err != nil {
+					if updatedVaultAccesses == nil {
+						dialog.ShowError(
+							err,
+							window,
+						)
+
+						syncButton.Enable()
+
+						return
+					}
+
+					applyVaultAccesses(
+						updatedVaultAccesses,
+						needSync,
+					)
 
 					dialog.ShowError(
 						err,
@@ -113,21 +155,10 @@ func New(
 					return
 				}
 
-				allVaultAccesses = updatedVaultAccesses
-
-				filteredVaultAccesses = filterVaultAccesses(
-					allVaultAccesses,
-					search.Text,
+				applyVaultAccesses(
+					updatedVaultAccesses,
+					needSync,
 				)
-
-				if needSync {
-					syncButton.Enable()
-				} else {
-					syncButton.Disable()
-				}
-
-				entryList.UnselectAll()
-				entryList.Refresh()
 			})
 		}()
 	}
@@ -138,19 +169,24 @@ func New(
 		func() {
 			syncButton.Disable()
 
-			_, err := vaultService.Remote.Sync()
-			if err != nil {
-				syncButton.Enable()
+			go func() {
+				_, err := vaultService.Remote.Sync()
 
-				dialog.ShowError(
-					err,
-					window,
-				)
+				fyne.Do(func() {
+					if err != nil {
+						syncButton.Enable()
 
-				return
-			}
+						dialog.ShowError(
+							err,
+							window,
+						)
 
-			reload()
+						return
+					}
+
+					reload()
+				})
+			}()
 		},
 	)
 
@@ -214,8 +250,12 @@ func New(
 				actionCell,
 			)
 		},
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(filteredVaultAccesses) {
+		func(
+			id widget.ListItemID,
+			obj fyne.CanvasObject,
+		) {
+			if id < 0 ||
+				id >= len(filteredVaultAccesses) {
 				return
 			}
 
@@ -395,8 +435,11 @@ func New(
 		entryList,
 	)
 
-	entryList.OnSelected = func(id widget.ListItemID) {
-		if id < 0 || id >= len(filteredVaultAccesses) {
+	entryList.OnSelected = func(
+		id widget.ListItemID,
+	) {
+		if id < 0 ||
+			id >= len(filteredVaultAccesses) {
 			return
 		}
 
@@ -451,20 +494,36 @@ func New(
 		)
 	}
 
-	// Tampilkan loading terlebih dahulu.
 	content.Objects = []fyne.CanvasObject{
 		loadingView.Content,
 	}
 
-	// Jalankan List() di background.
 	go func() {
 		updatedVaultAccesses, needSync, err :=
 			vaultService.List()
 
 		fyne.Do(func() {
-			if err != nil && updatedVaultAccesses == nil {
-				loadingView.ShowError(
-					"Failed to load collections.",
+			if err != nil {
+				if updatedVaultAccesses == nil {
+					loadingView.ShowError(
+						"Failed to load collections.",
+					)
+
+					dialog.ShowError(
+						err,
+						window,
+					)
+
+					return
+				}
+
+				applyVaultAccesses(
+					updatedVaultAccesses,
+					needSync,
+				)
+
+				loadingView.Show(
+					vaultContent,
 				)
 
 				dialog.ShowError(
@@ -475,20 +534,10 @@ func New(
 				return
 			}
 
-			allVaultAccesses = updatedVaultAccesses
-
-			filteredVaultAccesses = filterVaultAccesses(
-				allVaultAccesses,
-				search.Text,
+			applyVaultAccesses(
+				updatedVaultAccesses,
+				needSync,
 			)
-
-			if needSync {
-				syncButton.Enable()
-			} else {
-				syncButton.Disable()
-			}
-
-			entryList.Refresh()
 
 			loadingView.Show(
 				vaultContent,
@@ -545,7 +594,9 @@ func showForm(
 				return
 			}
 
-			name := nameEntry.Text
+			name := strings.TrimSpace(
+				nameEntry.Text,
+			)
 
 			if name == "" {
 				dialog.ShowInformation(

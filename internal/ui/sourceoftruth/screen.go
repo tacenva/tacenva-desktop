@@ -7,7 +7,6 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-
 	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-desktop/internal/ui/app"
 	rCoreApp "github.com/tacenva/tacenva-services/app"
@@ -58,6 +57,19 @@ func New(
 	)
 
 	var list *widget.List
+
+	// Reload data dari database/service.
+	reload := func() {
+		updatedList, err := sotService.List()
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+
+		sotList = updatedList
+		list.Refresh()
+	}
+
 	list = widget.NewList(
 		func() int {
 			return len(sotList)
@@ -146,14 +158,12 @@ func New(
 					window,
 					&selectedSot,
 					func(updatedSot *entity.SourceOfTruth) {
-						err := sotService.Update(updatedSot)
-						if err != nil {
+						if err := sotService.Update(updatedSot); err != nil {
 							dialog.ShowError(err, window)
 							return
 						}
 
-						sotList[id] = *updatedSot
-						list.RefreshItem(id)
+						reload()
 					},
 				)
 			}
@@ -163,9 +173,14 @@ func New(
 					window,
 					selectedSot.Hostname,
 					func() {
-						sotService.Del(&selectedSot)
-						sotList = append(sotList[:id], sotList[id+1:]...)
-						list.Refresh()
+						if _, err := sotService.Del(
+							&selectedSot,
+						); err != nil {
+							dialog.ShowError(err, window)
+							return
+						}
+
+						reload()
 					},
 				)
 			}
@@ -185,7 +200,7 @@ func New(
 				window,
 				nil,
 				func(newSot *entity.SourceOfTruth) {
-					sotId, err := sotService.Create(
+					_, err := sotService.Create(
 						newSot.Hostname,
 						newSot.Address,
 						newSot.KeyPair,
@@ -195,9 +210,8 @@ func New(
 						dialog.ShowError(err, window)
 						return
 					}
-					newSot.ID = sotId
-					sotList = append(sotList, *newSot)
-					list.Refresh()
+
+					reload()
 				},
 			)
 		},
@@ -258,6 +272,8 @@ func New(
 					appDeps.Client.ClearTLS(selectedSot.Address)
 
 					list.Unselect(id)
+
+					reload()
 				})
 			},
 		)
