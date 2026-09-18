@@ -247,6 +247,13 @@ func New(
 
 		selectedSot := sotList[id]
 
+		// Temporary: reset TLS fingerprint sebelum masuk ke node.
+		if err := sotService.ResetTLSFingerprint(&selectedSot); err != nil {
+			dialog.ShowError(err, window)
+			list.Unselect(id)
+			return
+		}
+
 		nodeDBDir := appDeps.Config.Path(
 			config.NodeDirName,
 			selectedSot.ID,

@@ -29,7 +29,10 @@ func New(
 	sotService *sourceoftruth.Service,
 	onBack func(),
 ) *Screen {
-	appDeps.Client.SetToken(context.SelectedSoT.AuthToken)
+	appDeps.Client.SetToken(
+		context.SelectedSoT.AuthToken,
+	)
+
 	appDeps.Client.ConfigureTLS(
 		context.SelectedSoT.Address,
 		api.TLSConfig{
@@ -39,7 +42,10 @@ func New(
 				fingerprint string,
 			) error {
 				context.SelectedSoT.TLSFingerprint = fingerprint
-				return sotService.Update(context.SelectedSoT)
+
+				return sotService.Update(
+					context.SelectedSoT,
+				)
 			},
 		},
 	)
@@ -62,8 +68,14 @@ func New(
 
 	settingScreen := setting.New(
 		window,
-		func(currentPassword, newPassword string) error {
-			return sotService.ChangePassword(currentPassword, newPassword)
+		func(
+			currentPassword,
+			newPassword string,
+		) error {
+			return sotService.ChangePassword(
+				currentPassword,
+				newPassword,
+			)
 		},
 	)
 
@@ -96,18 +108,21 @@ func New(
 			mainContent.Objects = []fyne.CanvasObject{
 				vaultScreen.Content,
 			}
+
 			mainContent.Refresh()
 		},
 		func() {
 			mainContent.Objects = []fyne.CanvasObject{
 				acScreen.Content,
 			}
+
 			mainContent.Refresh()
 		},
 		func() {
 			mainContent.Objects = []fyne.CanvasObject{
 				settingScreen.Content,
 			}
+
 			mainContent.Refresh()
 		},
 	)
@@ -117,7 +132,9 @@ func New(
 		nil,
 		sidebar,
 		nil,
-		container.NewPadded(mainContent),
+		container.NewPadded(
+			mainContent,
+		),
 	)
 
 	content := container.NewBorder(

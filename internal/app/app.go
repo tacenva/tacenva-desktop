@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -17,10 +18,53 @@ func Run(dev bool) {
 
 	window := a.NewWindow("Tacenva Password")
 	window.Resize(fyne.NewSize(1000, 650))
+
 	appDeps, err := replicaCore.Setup(dev)
 	if err != nil {
-		fmt.Print(err)
+		fmt.Println(err)
 		return
+	}
+
+	fmt.Println("starting server discovery...")
+
+	servers, err := appDeps.ServerService.Discover(
+		5 * time.Second,
+	)
+	if err != nil {
+		fmt.Printf(
+			"server discovery error: %v\n",
+			err,
+		)
+	} else {
+		fmt.Printf(
+			"server discovery found %d server(s)\n",
+			len(servers),
+		)
+
+		for _, server := range servers {
+			address := server.Address()
+			dialAddress := server.DialAddress()
+
+			fmt.Printf(
+				"server: source=%s name=%q host=%q ip=%s port=%d\n",
+				server.Source,
+				server.Name,
+				server.Host,
+				server.IP,
+				server.Port,
+			)
+
+			fmt.Printf(
+				"configuring dial address: %s -> %s\n",
+				address,
+				dialAddress,
+			)
+
+			appDeps.Client.ConfigureDialAddress(
+				address,
+				dialAddress,
+			)
+		}
 	}
 
 	services := coreapp.NewServices(
@@ -33,7 +77,14 @@ func Run(dev bool) {
 		services.Auth,
 		services.AccessControl,
 	)
-	loginScreen := login.New(window, appDeps, services, sotService)
+
+	loginScreen := login.New(
+		window,
+		appDeps,
+		services,
+		sotService,
+	)
+
 	window.SetContent(loginScreen.Content)
 	window.ShowAndRun()
 }
