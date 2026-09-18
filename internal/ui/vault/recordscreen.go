@@ -40,7 +40,7 @@ func NewRecordScreen(
 		context,
 		masterKey,
 		coreService.Vault,
-		coreService.VaultRecordService,
+		coreService.VaultRecord,
 		coreService.Auth,
 		sotService,
 	)

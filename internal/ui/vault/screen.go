@@ -35,7 +35,7 @@ func New(
 		context,
 		masterKey,
 		coreService.Vault,
-		coreService.VaultRecordService,
+		coreService.VaultRecord,
 		coreService.Auth,
 		sotService,
 	)
