@@ -35,6 +35,7 @@ func New(
 		context,
 		masterKey,
 		coreService.Vault,
+		coreService.VaultRecordService,
 		coreService.Auth,
 		sotService,
 	)
@@ -170,7 +171,7 @@ func New(
 			syncButton.Disable()
 
 			go func() {
-				_, err := vaultService.Remote.Sync()
+				_, err := vaultService.Sync()
 
 				fyne.Do(func() {
 					if err != nil {

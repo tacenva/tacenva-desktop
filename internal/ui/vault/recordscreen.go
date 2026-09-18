@@ -40,6 +40,7 @@ func NewRecordScreen(
 		context,
 		masterKey,
 		coreService.Vault,
+		coreService.VaultRecordService,
 		coreService.Auth,
 		sotService,
 	)
@@ -187,8 +188,8 @@ func NewRecordScreen(
 			syncButton.Disable()
 
 			go func() {
-				_, err := vaultService.Remote.SyncRecords(
-					vaultAccess.Vault.ID,
+				_, err := vaultService.SyncRecords(
+					vaultAccess,
 				)
 
 				fyne.Do(func() {
