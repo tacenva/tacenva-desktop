@@ -4,9 +4,9 @@ go 1.26.5
 
 require (
 	fyne.io/fyne/v2 v2.8.1
-	github.com/tacenva/database v1.0.0-alpha.3
-	github.com/tacenva/tacenva-services v1.0.0-alpha.1
-	github.com/tacenva/tacpass-core v1.0.0-alpha.2
+	github.com/tacenva/database v1.0.0-alpha.4
+	github.com/tacenva/tacenva-services v1.0.0-alpha.2
+	github.com/tacenva/tacpass-core v1.0.0-alpha.3
 )
 
 require (
