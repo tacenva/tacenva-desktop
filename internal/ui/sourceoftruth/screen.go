@@ -1,25 +1,40 @@
 package sourceoftruth
 
 import (
+	"fmt"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/tacenva/database"
-	"github.com/tacenva/tacenva-desktop/internal/ui/app"
+
+	"github.com/tacenva/tacenva-desktop/internal/ui/discovery"
 	rCoreApp "github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/entity"
 	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/config"
 	"github.com/tacenva/tacpass-core/util/keyring"
 )
+
+type OpenNodeFunc func(
+	selectedSot *entity.SourceOfTruth,
+	masterKey string,
+	onBack func(),
+) fyne.CanvasObject
 
 type Screen struct {
 	Content    fyne.CanvasObject
 	sotService *sourceoftruth.Service
+
+	list      *widget.List
+	newButton *widget.Button
+
+	discoveryState *discovery.State
+
+	discoveryStatus  *widget.Label
+	discoveryLoading *widget.ProgressBarInfinite
 }
 
 func New(
@@ -28,6 +43,8 @@ func New(
 	masterKey string,
 	coreServices *coreApp.Services,
 	sotService *sourceoftruth.Service,
+	discoveryState *discovery.State,
+	openNode OpenNodeFunc,
 ) *Screen {
 	sotList, err := sotService.List()
 	if err != nil {
@@ -52,13 +69,17 @@ func New(
 	)
 
 	header := container.New(
-		layout.NewCustomPaddedLayout(0, 0, 24, 24),
+		layout.NewCustomPaddedLayout(
+			0,
+			0,
+			24,
+			24,
+		),
 		headerContent,
 	)
 
 	var list *widget.List
 
-	// Reload data dari database/service.
 	reload := func() {
 		updatedList, err := sotService.List()
 		if err != nil {
@@ -153,7 +174,19 @@ func New(
 			name.SetText(selectedSot.Hostname)
 			address.SetText(selectedSot.Address)
 
+			if discoveryState.Done() {
+				editButton.Enable()
+				deleteButton.Enable()
+			} else {
+				editButton.Disable()
+				deleteButton.Disable()
+			}
+
 			editButton.OnTapped = func() {
+				if !discoveryState.Done() {
+					return
+				}
+
 				showForm(
 					window,
 					&selectedSot,
@@ -169,13 +202,15 @@ func New(
 			}
 
 			deleteButton.OnTapped = func() {
+				if !discoveryState.Done() {
+					return
+				}
+
 				showDeleteConfirm(
 					window,
 					selectedSot.Hostname,
 					func() {
-						if _, err := sotService.Del(
-							&selectedSot,
-						); err != nil {
+						if _, err := sotService.Del(&selectedSot); err != nil {
 							dialog.ShowError(err, window)
 							return
 						}
@@ -188,7 +223,12 @@ func New(
 	)
 
 	listContent := container.New(
-		layout.NewCustomPaddedLayout(0, 0, 24, 24),
+		layout.NewCustomPaddedLayout(
+			0,
+			0,
+			24,
+			24,
+		),
 		list,
 	)
 
@@ -196,6 +236,10 @@ func New(
 		"New",
 		theme.ContentAddIcon(),
 		func() {
+			if !discoveryState.Done() {
+				return
+			}
+
 			showForm(
 				window,
 				nil,
@@ -217,6 +261,10 @@ func New(
 		},
 	)
 
+	if !discoveryState.Done() {
+		newButton.Disable()
+	}
+
 	newButtonContainer := container.NewGridWrap(
 		fyne.NewSize(90, 36),
 		newButton,
@@ -228,55 +276,139 @@ func New(
 	)
 
 	actions := container.New(
-		layout.NewCustomPaddedLayout(0, 0, 24, 24),
+		layout.NewCustomPaddedLayout(
+			0,
+			0,
+			24,
+			24,
+		),
 		actionsContent,
+	)
+
+	discoveryStatus := widget.NewLabel(
+		"Discovering Source of Truth...",
+	)
+
+	discoveryLoading := widget.NewProgressBarInfinite()
+
+	discoveryIndicator := container.NewHBox(
+		discoveryLoading,
+		discoveryStatus,
+	)
+
+	discoveryBar := container.New(
+		layout.NewCustomPaddedLayout(
+			8,
+			8,
+			12,
+			12,
+		),
+		discoveryIndicator,
+	)
+
+	discoveryBarRight := container.NewHBox(
+		layout.NewSpacer(),
+		discoveryBar,
+	)
+
+	footer := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		nil,
+		actions,
+	)
+
+	footerRight := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		discoveryBarRight,
+		footer,
 	)
 
 	content := container.NewBorder(
 		header,
-		actions,
+		footerRight,
 		nil,
 		nil,
 		listContent,
 	)
 
+	screen := &Screen{
+		Content:          content,
+		sotService:       sotService,
+		list:             list,
+		newButton:        newButton,
+		discoveryState:   discoveryState,
+		discoveryStatus:  discoveryStatus,
+		discoveryLoading: discoveryLoading,
+	}
+
+	updateDiscoveryUI := func() {
+		screen.discoveryLoading.Hide()
+
+		if discoveryState.Error() != nil {
+			screen.discoveryStatus.SetText(
+				"Discovery failed",
+			)
+		} else {
+			screen.discoveryStatus.SetText(
+				fmt.Sprintf(
+					"Discovery complete · %d server(s) found",
+					discoveryState.Count(),
+				),
+			)
+		}
+
+		screen.newButton.Enable()
+
+		// List tidak punya Enable/Disable di Fyne.
+		// Refresh diperlukan agar row button yang sebelumnya
+		// disabled dibuat ulang dalam kondisi enabled.
+		screen.list.Refresh()
+
+		screen.Content.Refresh()
+	}
+
+	if discoveryState.Done() {
+		updateDiscoveryUI()
+	} else {
+		discoveryState.OnDone(func() {
+			fyne.Do(updateDiscoveryUI)
+		})
+	}
+
 	list.OnSelected = func(id widget.ListItemID) {
+		if !discoveryState.Done() {
+			list.Unselect(id)
+			return
+		}
+
 		if id < 0 || id >= len(sotList) {
 			return
 		}
 
 		selectedSot := sotList[id]
 
-		// Temporary: reset TLS fingerprint sebelum masuk ke node.
+		// Temporary untuk testing trust ulang.
 		if err := sotService.ResetTLSFingerprint(&selectedSot); err != nil {
 			dialog.ShowError(err, window)
 			list.Unselect(id)
 			return
 		}
 
-		nodeDBDir := appDeps.Config.Path(
-			config.NodeDirName,
-			selectedSot.ID,
-			"vault",
-		)
-
-		appScreen := app.New(
-			window,
-			appDeps,
-			&rCoreApp.Context{
-				SelectedSoT: &selectedSot,
-				NodeDB:      database.New(nodeDBDir),
-				IsRemote:    selectedSot.Address != "localhost",
-			},
+		nodeContent := openNode(
+			&selectedSot,
 			masterKey,
-			coreServices,
-			sotService,
 			func() {
 				fyne.Do(func() {
 					window.SetContent(content)
 
 					appDeps.Client.ClearToken()
-					appDeps.Client.ClearTLS(selectedSot.Address)
+					appDeps.Client.ClearTLS(
+						selectedSot.Address,
+					)
 
 					list.Unselect(id)
 
@@ -286,15 +418,12 @@ func New(
 		)
 
 		fyne.Do(func() {
-			window.SetContent(appScreen.Content)
+			window.SetContent(nodeContent)
 			list.Unselect(id)
 		})
 	}
 
-	return &Screen{
-		Content:    content,
-		sotService: sotService,
-	}
+	return screen
 }
 
 func showForm(
@@ -363,7 +492,6 @@ func showForm(
 		),
 	}
 
-	// Sync Mode hanya ditampilkan untuk remote Source of Truth.
 	if addressEntry.Text != "localhost" {
 		formItems = append(
 			formItems,
@@ -374,9 +502,7 @@ func showForm(
 		)
 	}
 
-	form := widget.NewForm(
-		formItems...,
-	)
+	form := widget.NewForm(formItems...)
 
 	formContainer := container.NewGridWrap(
 		fyne.NewSize(650, 420),
@@ -399,7 +525,6 @@ func showForm(
 				return
 			}
 
-			hostname := hostnameEntry.Text
 			address := addressEntry.Text
 
 			if address == "" {
@@ -412,7 +537,7 @@ func showForm(
 				return
 			}
 
-			sot.Hostname = hostname
+			sot.Hostname = hostnameEntry.Text
 			sot.Address = address
 
 			sot.KeyPair = *keyring.FromKeys(
