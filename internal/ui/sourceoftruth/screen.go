@@ -392,11 +392,11 @@ func New(
 		selectedSot := sotList[id]
 
 		// Temporary untuk testing trust ulang.
-		if err := sotService.ResetTLSFingerprint(&selectedSot); err != nil {
-			dialog.ShowError(err, window)
-			list.Unselect(id)
-			return
-		}
+		// if err := sotService.ResetTLSFingerprint(&selectedSot); err != nil {
+		// 	dialog.ShowError(err, window)
+		// 	list.Unselect(id)
+		// 	return
+		// }
 
 		nodeContent := openNode(
 			&selectedSot,
