@@ -1,7 +1,10 @@
 package sourceoftruth
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -37,6 +40,54 @@ type Screen struct {
 	discoveryLoading *widget.ProgressBarInfinite
 }
 
+// encodedSecretKey adalah format internal untuk encoded Secret Key.
+// Pengguna cukup memasukkan string Base64, bukan JSON secara manual.
+type encodedSecretKey struct {
+	PublicKey  string `json:"public_key"`
+	PrivateKey string `json:"private_key"`
+}
+
+func encodeSecretKey(publicKey, privateKey string) (string, error) {
+	payload, err := json.Marshal(encodedSecretKey{
+		PublicKey:  publicKey,
+		PrivateKey: privateKey,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode secret key: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(payload), nil
+}
+
+func decodeSecretKey(secret string) (*encodedSecretKey, error) {
+	secret = strings.TrimSpace(secret)
+
+	if secret == "" {
+		return nil, fmt.Errorf("Secret Key wajib diisi")
+	}
+
+	payload, err := base64.StdEncoding.DecodeString(secret)
+	if err != nil {
+		return nil, fmt.Errorf("Secret Key tidak valid: encoding Base64 gagal")
+	}
+
+	var result encodedSecretKey
+
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("Secret Key tidak valid: format data salah")
+	}
+
+	if strings.TrimSpace(result.PublicKey) == "" {
+		return nil, fmt.Errorf("Secret Key tidak valid: data tidak lengkap")
+	}
+
+	if strings.TrimSpace(result.PrivateKey) == "" {
+		return nil, fmt.Errorf("Secret Key tidak valid: data tidak lengkap")
+	}
+
+	return &result, nil
+}
+
 func New(
 	window fyne.Window,
 	appDeps *rCoreApp.Deps,
@@ -59,9 +110,7 @@ func New(
 		},
 	)
 
-	subtitle := widget.NewLabel(
-		"Choose node",
-	)
+	subtitle := widget.NewLabel("Choose node")
 
 	headerContent := container.NewVBox(
 		title,
@@ -363,11 +412,8 @@ func New(
 
 		screen.newButton.Enable()
 
-		// List tidak punya Enable/Disable di Fyne.
-		// Refresh diperlukan agar row button yang sebelumnya
-		// disabled dibuat ulang dalam kondisi enabled.
+		// Refresh row buttons agar status enabled/disabled diperbarui.
 		screen.list.Refresh()
-
 		screen.Content.Refresh()
 	}
 
@@ -447,13 +493,23 @@ func showForm(
 	addressEntry.SetText(sot.Address)
 	addressEntry.SetPlaceHolder("Source of Truth address")
 
-	publicKeyEntry := widget.NewMultiLineEntry()
-	publicKeyEntry.SetText(sot.KeyPair.PublicKey)
-	publicKeyEntry.SetMinRowsVisible(4)
+	secretKeyEntry := widget.NewMultiLineEntry()
+	secretKeyEntry.SetPlaceHolder("Paste secret key")
+	secretKeyEntry.SetMinRowsVisible(4)
 
-	privateKeyEntry := widget.NewMultiLineEntry()
-	privateKeyEntry.SetText(sot.KeyPair.PrivateKey)
-	privateKeyEntry.SetMinRowsVisible(4)
+	// Saat edit, tampilkan key yang tersimpan dalam format encoded.
+	if sot.KeyPair.PublicKey != "" || sot.KeyPair.PrivateKey != "" {
+		secret, err := encodeSecretKey(
+			sot.KeyPair.PublicKey,
+			sot.KeyPair.PrivateKey,
+		)
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+
+		secretKeyEntry.SetText(secret)
+	}
 
 	syncModeSelect := widget.NewSelect(
 		[]string{
@@ -464,13 +520,9 @@ func showForm(
 	)
 
 	if sot.SyncMode != "" {
-		syncModeSelect.SetSelected(
-			string(sot.SyncMode),
-		)
+		syncModeSelect.SetSelected(string(sot.SyncMode))
 	} else {
-		syncModeSelect.SetSelected(
-			string(entity.SyncModeManual),
-		)
+		syncModeSelect.SetSelected(string(entity.SyncModeManual))
 	}
 
 	formItems := []*widget.FormItem{
@@ -483,12 +535,8 @@ func showForm(
 			addressEntry,
 		),
 		widget.NewFormItem(
-			"Public Key",
-			publicKeyEntry,
-		),
-		widget.NewFormItem(
-			"Private Key",
-			privateKeyEntry,
+			"Secret Key",
+			secretKeyEntry,
 		),
 	}
 
@@ -525,7 +573,7 @@ func showForm(
 				return
 			}
 
-			address := addressEntry.Text
+			address := strings.TrimSpace(addressEntry.Text)
 
 			if address == "" {
 				dialog.ShowInformation(
@@ -533,16 +581,20 @@ func showForm(
 					"Address wajib diisi.",
 					window,
 				)
+				return
+			}
 
+			pair, err := decodeSecretKey(secretKeyEntry.Text)
+			if err != nil {
+				dialog.ShowError(err, window)
 				return
 			}
 
 			sot.Hostname = hostnameEntry.Text
 			sot.Address = address
-
 			sot.KeyPair = *keyring.FromKeys(
-				publicKeyEntry.Text,
-				privateKeyEntry.Text,
+				pair.PublicKey,
+				pair.PrivateKey,
 			)
 
 			if address != "localhost" {
