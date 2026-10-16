@@ -137,7 +137,7 @@ func NewRecordScreen(
 
 		go func() {
 			updatedVaultRecords, needSync, err :=
-				vaultService.ListRecords(
+				vaultService.ListRecord(
 					vaultAccess,
 				)
 
@@ -188,7 +188,7 @@ func NewRecordScreen(
 			syncButton.Disable()
 
 			go func() {
-				_, err := vaultService.SyncRecords(
+				err := vaultService.SyncRecord(
 					vaultAccess,
 				)
 
@@ -564,7 +564,7 @@ func NewRecordScreen(
 
 	go func() {
 		updatedVaultRecords, needSync, err :=
-			vaultService.ListRecords(
+			vaultService.ListRecord(
 				vaultAccess,
 			)
 

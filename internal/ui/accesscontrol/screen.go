@@ -80,8 +80,13 @@ func New(
 				string(permission.Privilege),
 			)
 
+			group := strings.ToLower(
+				permission.Group,
+			)
+
 			if strings.Contains(name, query) ||
-				strings.Contains(privilege, query) {
+				strings.Contains(privilege, query) ||
+				strings.Contains(group, query) {
 				filtered = append(
 					filtered,
 					permission,
@@ -127,6 +132,7 @@ func New(
 		},
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
+			group := widget.NewLabel("")
 			privilege := widget.NewLabel("")
 
 			editButton := widget.NewButtonWithIcon(
@@ -154,6 +160,14 @@ func New(
 				name,
 			)
 
+			groupCell := container.NewBorder(
+				nil,
+				nil,
+				nil,
+				nil,
+				group,
+			)
+
 			privilegeCell := container.NewBorder(
 				nil,
 				nil,
@@ -171,8 +185,9 @@ func New(
 			)
 
 			return container.NewGridWithColumns(
-				3,
+				4,
 				nameCell,
+				groupCell,
 				privilegeCell,
 				actionCell,
 			)
@@ -187,10 +202,12 @@ func New(
 			row := obj.(*fyne.Container)
 
 			nameCell := row.Objects[0].(*fyne.Container)
-			privilegeCell := row.Objects[1].(*fyne.Container)
-			actionCell := row.Objects[2].(*fyne.Container)
+			groupCell := row.Objects[1].(*fyne.Container)
+			privilegeCell := row.Objects[2].(*fyne.Container)
+			actionCell := row.Objects[3].(*fyne.Container)
 
 			name := nameCell.Objects[0].(*widget.Label)
+			group := groupCell.Objects[0].(*widget.Label)
 			privilege := privilegeCell.Objects[0].(*widget.Label)
 			actions := actionCell.Objects[0].(*fyne.Container)
 
@@ -198,6 +215,12 @@ func New(
 			deleteButton := actions.Objects[1].(*widget.Button)
 
 			name.SetText(acData.Name)
+
+			if acData.Group == "" {
+				group.SetText("-")
+			} else {
+				group.SetText(acData.Group)
+			}
 
 			privilege.SetText(
 				string(acData.Privilege),
@@ -241,6 +264,27 @@ func New(
 								err = acService.ChangePrivilege(
 									updated.ID,
 									updated.Privilege,
+								)
+
+								if err != nil {
+									fyne.Do(func() {
+										editButton.Enable()
+										deleteButton.Enable()
+
+										dialog.ShowError(
+											err,
+											window,
+										)
+									})
+
+									return
+								}
+							}
+
+							if updated.Group != selected.Group {
+								err = acService.ChangeGroup(
+									updated.ID,
+									updated.Group,
 								)
 
 								if err != nil {
@@ -339,6 +383,7 @@ func New(
 						_, _, keyPair, err := acService.Create(
 							newPermission.Name,
 							newPermission.Privilege,
+							newPermission.Group,
 						)
 
 						fyne.Do(func() {
@@ -452,12 +497,6 @@ func New(
 		)
 	}
 
-	// Tampilkan loading terlebih dahulu.
-	content.Objects = []fyne.CanvasObject{
-		loadingView.Content,
-	}
-
-	// Jalankan List() di background.
 	go func() {
 		updatedACL, err := acService.List()
 
@@ -511,6 +550,10 @@ func showForm(
 	nameEntry := widget.NewEntry()
 	nameEntry.SetText(permission.Name)
 
+	groupEntry := widget.NewEntry()
+	groupEntry.SetText(permission.Group)
+	groupEntry.SetPlaceHolder("Permission group...")
+
 	privilegeRadio := widget.NewRadioGroup(
 		[]string{
 			string(entity.PrivilegeAdmin),
@@ -532,6 +575,24 @@ func showForm(
 		)
 	}
 
+	updateGroupState := func(privilege string) {
+		if entity.Privilege(privilege) == entity.PrivilegeAdmin {
+			groupEntry.SetText("")
+			groupEntry.Disable()
+			return
+		}
+
+		groupEntry.Enable()
+	}
+
+	updateGroupState(
+		privilegeRadio.Selected,
+	)
+
+	privilegeRadio.OnChanged = func(selected string) {
+		updateGroupState(selected)
+	}
+
 	form := widget.NewForm(
 		widget.NewFormItem(
 			"Name",
@@ -540,6 +601,10 @@ func showForm(
 		widget.NewFormItem(
 			"Privilege",
 			privilegeRadio,
+		),
+		widget.NewFormItem(
+			"Group",
+			groupEntry,
 		),
 	)
 
@@ -564,7 +629,9 @@ func showForm(
 				return
 			}
 
-			name := nameEntry.Text
+			name := strings.TrimSpace(
+				nameEntry.Text,
+			)
 
 			if name == "" {
 				dialog.ShowInformation(
@@ -590,6 +657,14 @@ func showForm(
 			permission.Privilege = entity.Privilege(
 				privilegeRadio.Selected,
 			)
+
+			if permission.Privilege == entity.PrivilegeAdmin {
+				permission.Group = ""
+			} else {
+				permission.Group = strings.TrimSpace(
+					groupEntry.Text,
+				)
+			}
 
 			onSave(&permission)
 		},

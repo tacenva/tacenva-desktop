@@ -127,8 +127,7 @@ func New(
 		syncButton.Disable()
 
 		go func() {
-			updatedVaultAccesses, needSync, err :=
-				vaultService.List()
+			updatedVaultAccesses, needSync, err := vaultService.List()
 
 			fyne.Do(func() {
 				if err != nil {
@@ -171,7 +170,7 @@ func New(
 			syncButton.Disable()
 
 			go func() {
-				_, err := vaultService.Sync()
+				err := vaultService.SyncVault()
 
 				fyne.Do(func() {
 					if err != nil {
