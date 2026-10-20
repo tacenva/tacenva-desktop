@@ -1,8 +1,6 @@
 package sourceoftruth
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/tacenva-desktop/internal/ui/discovery"
+	"github.com/tacenva/tacenva-desktop/internal/util"
 	rCoreApp "github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/entity"
@@ -38,54 +37,6 @@ type Screen struct {
 
 	discoveryStatus  *widget.Label
 	discoveryLoading *widget.ProgressBarInfinite
-}
-
-// encodedSecretKey adalah format internal untuk encoded Secret Key.
-// Pengguna cukup memasukkan string Base64, bukan JSON secara manual.
-type encodedSecretKey struct {
-	PublicKey  string `json:"public_key"`
-	PrivateKey string `json:"private_key"`
-}
-
-func encodeSecretKey(publicKey, privateKey string) (string, error) {
-	payload, err := json.Marshal(encodedSecretKey{
-		PublicKey:  publicKey,
-		PrivateKey: privateKey,
-	})
-	if err != nil {
-		return "", fmt.Errorf("encode secret key: %w", err)
-	}
-
-	return base64.StdEncoding.EncodeToString(payload), nil
-}
-
-func decodeSecretKey(secret string) (*encodedSecretKey, error) {
-	secret = strings.TrimSpace(secret)
-
-	if secret == "" {
-		return nil, fmt.Errorf("Secret Key wajib diisi")
-	}
-
-	payload, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil {
-		return nil, fmt.Errorf("Secret Key tidak valid: encoding Base64 gagal")
-	}
-
-	var result encodedSecretKey
-
-	if err := json.Unmarshal(payload, &result); err != nil {
-		return nil, fmt.Errorf("Secret Key tidak valid: format data salah")
-	}
-
-	if strings.TrimSpace(result.PublicKey) == "" {
-		return nil, fmt.Errorf("Secret Key tidak valid: data tidak lengkap")
-	}
-
-	if strings.TrimSpace(result.PrivateKey) == "" {
-		return nil, fmt.Errorf("Secret Key tidak valid: data tidak lengkap")
-	}
-
-	return &result, nil
 }
 
 func New(
@@ -499,7 +450,7 @@ func showForm(
 
 	// Saat edit, tampilkan key yang tersimpan dalam format encoded.
 	if sot.KeyPair.PublicKey != "" || sot.KeyPair.PrivateKey != "" {
-		secret, err := encodeSecretKey(
+		secret, err := util.EncodeSecretKey(
 			sot.KeyPair.PublicKey,
 			sot.KeyPair.PrivateKey,
 		)
@@ -584,7 +535,7 @@ func showForm(
 				return
 			}
 
-			pair, err := decodeSecretKey(secretKeyEntry.Text)
+			pair, err := util.DecodeSecretKey(secretKeyEntry.Text)
 			if err != nil {
 				dialog.ShowError(err, window)
 				return

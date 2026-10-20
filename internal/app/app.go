@@ -1,7 +1,7 @@
 package app
 
 import (
-	"fmt"
+	"log"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -29,7 +29,7 @@ func Run(dev bool) {
 
 	appDeps, err := replicaCore.Setup(dev)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 
@@ -89,20 +89,20 @@ func Run(dev bool) {
 	window.Show()
 
 	go func() {
-		fmt.Println("starting server discovery...")
+		log.Println("[SERVER DISCOVERY] starting...")
 
 		servers, err := appDeps.ServerService.Discover(
 			5 * time.Second,
 		)
 
 		if err != nil {
-			fmt.Printf(
-				"server discovery error: %v\n",
+			log.Printf(
+				"[SERVER DISCOVERY] warn: %v\n",
 				err,
 			)
 		} else {
-			fmt.Printf(
-				"server discovery found %d server(s)\n",
+			log.Printf(
+				"[SERVER DISCOVERY] found %d server(s)\n",
 				len(servers),
 			)
 
@@ -110,7 +110,7 @@ func Run(dev bool) {
 				address := server.Address()
 				dialAddress := server.DialAddress()
 
-				fmt.Printf(
+				log.Printf(
 					"server: source=%s name=%q host=%q ip=%s port=%d\n",
 					server.Source,
 					server.Name,
@@ -119,7 +119,7 @@ func Run(dev bool) {
 					server.Port,
 				)
 
-				fmt.Printf(
+				log.Printf(
 					"configuring dial address: %s -> %s\n",
 					address,
 					dialAddress,
@@ -131,6 +131,8 @@ func Run(dev bool) {
 				)
 			}
 		}
+
+		log.Println("[SERVER DISCOVERY] done")
 
 		// Harus selalu Complete, termasuk saat discovery error.
 		// Kalau tidak, UI akan tetap disabled selamanya.

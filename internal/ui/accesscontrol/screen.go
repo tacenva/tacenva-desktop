@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
+	"github.com/tacenva/tacenva-desktop/internal/util"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
@@ -41,56 +42,34 @@ func New(
 
 	allACL := make([]entity.Permission, 0)
 	filteredACL := make([]entity.Permission, 0)
+	allGroups := make([]entity.PermissionGroup, 0)
 
 	var entryList *widget.List
 
 	content := container.NewMax()
-
-	loadingView := loading.New(
-		"Loading access controls...",
-	)
+	loadingView := loading.New("Loading access controls...")
 
 	filterACL := func(
 		permissions []entity.Permission,
 		query string,
 	) []entity.Permission {
-		query = strings.ToLower(
-			strings.TrimSpace(query),
-		)
+		query = strings.ToLower(strings.TrimSpace(query))
 
 		if query == "" {
-			return append(
-				[]entity.Permission(nil),
-				permissions...,
-			)
+			return append([]entity.Permission(nil), permissions...)
 		}
 
-		filtered := make(
-			[]entity.Permission,
-			0,
-			len(permissions),
-		)
+		filtered := make([]entity.Permission, 0)
 
 		for _, permission := range permissions {
-			name := strings.ToLower(
-				permission.Name,
-			)
-
-			privilege := strings.ToLower(
-				string(permission.Privilege),
-			)
-
-			group := strings.ToLower(
-				permission.Group,
-			)
+			name := strings.ToLower(permission.Name)
+			privilege := strings.ToLower(string(permission.Privilege))
+			group := strings.ToLower(permission.Group.Name)
 
 			if strings.Contains(name, query) ||
 				strings.Contains(privilege, query) ||
 				strings.Contains(group, query) {
-				filtered = append(
-					filtered,
-					permission,
-				)
+				filtered = append(filtered, permission)
 			}
 		}
 
@@ -99,24 +78,26 @@ func New(
 
 	reload := func() {
 		go func() {
-			updatedACL, err := acService.List()
+			permissions, err := acService.List()
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, window)
+				})
+				return
+			}
+
+			groups, err := acService.ListGroups()
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, window)
+				})
+				return
+			}
 
 			fyne.Do(func() {
-				if err != nil {
-					dialog.ShowError(
-						err,
-						window,
-					)
-
-					return
-				}
-
-				allACL = updatedACL
-
-				filteredACL = filterACL(
-					allACL,
-					search.Text,
-				)
+				allACL = permissions
+				allGroups = groups
+				filteredACL = filterACL(allACL, search.Text)
 
 				if entryList != nil {
 					entryList.UnselectAll()
@@ -125,6 +106,8 @@ func New(
 			})
 		}()
 	}
+
+	var showManageGroups func()
 
 	entryList = widget.NewList(
 		func() int {
@@ -141,6 +124,8 @@ func New(
 				nil,
 			)
 
+			revokeButton := widget.NewButton("Revoke", nil)
+
 			deleteButton := widget.NewButtonWithIcon(
 				"",
 				theme.DeleteIcon(),
@@ -149,47 +134,23 @@ func New(
 
 			actions := container.NewHBox(
 				editButton,
+				revokeButton,
 				deleteButton,
 			)
 
-			nameCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
+			columns := container.NewGridWithColumns(
+				3,
 				name,
-			)
-
-			groupCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
 				group,
-			)
-
-			privilegeCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
 				privilege,
 			)
 
-			actionCell := container.NewBorder(
+			return container.NewBorder(
 				nil,
 				nil,
 				nil,
 				actions,
-				nil,
-			)
-
-			return container.NewGridWithColumns(
-				4,
-				nameCell,
-				groupCell,
-				privilegeCell,
-				actionCell,
+				columns,
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -198,33 +159,40 @@ func New(
 			}
 
 			acData := filteredACL[id]
-
 			row := obj.(*fyne.Container)
 
-			nameCell := row.Objects[0].(*fyne.Container)
-			groupCell := row.Objects[1].(*fyne.Container)
-			privilegeCell := row.Objects[2].(*fyne.Container)
-			actionCell := row.Objects[3].(*fyne.Container)
+			columns := row.Objects[0].(*fyne.Container)
+			actions := row.Objects[1].(*fyne.Container)
 
-			name := nameCell.Objects[0].(*widget.Label)
-			group := groupCell.Objects[0].(*widget.Label)
-			privilege := privilegeCell.Objects[0].(*widget.Label)
-			actions := actionCell.Objects[0].(*fyne.Container)
+			name := columns.Objects[0].(*widget.Label)
+			group := columns.Objects[1].(*widget.Label)
+			privilege := columns.Objects[2].(*widget.Label)
 
 			editButton := actions.Objects[0].(*widget.Button)
-			deleteButton := actions.Objects[1].(*widget.Button)
+			revokeButton := actions.Objects[1].(*widget.Button)
+			deleteButton := actions.Objects[2].(*widget.Button)
 
 			name.SetText(acData.Name)
 
-			if acData.Group == "" {
-				group.SetText("-")
-			} else {
-				group.SetText(acData.Group)
+			if acData.Group.Name != "" {
+				group.SetText(acData.Group.Name)
 			}
 
-			privilege.SetText(
-				string(acData.Privilege),
-			)
+			if acData.Revoked {
+				privilege.SetText(
+					string(acData.Privilege) + " (REVOKED)",
+				)
+				revokeButton.SetText("Restore")
+			} else {
+				privilege.SetText(string(acData.Privilege))
+				revokeButton.SetText("Revoke")
+			}
+
+			// if acData.Privilege == entity.PrivilegeAdmin {
+			// 	revokeButton.Disable()
+			// } else {
+			// 	revokeButton.Enable()
+			// }
 
 			editButton.OnTapped = func() {
 				selected := acData
@@ -232,83 +200,28 @@ func New(
 				showForm(
 					window,
 					&selected,
+					allGroups,
 					func(updated *entity.Permission) {
 						editButton.Disable()
+						revokeButton.Disable()
 						deleteButton.Disable()
 
 						go func() {
-							var err error
-
-							if updated.Name != selected.Name {
-								err = acService.ChangeName(
-									updated.ID,
-									updated.Name,
-								)
-
-								if err != nil {
-									fyne.Do(func() {
-										editButton.Enable()
-										deleteButton.Enable()
-
-										dialog.ShowError(
-											err,
-											window,
-										)
-									})
-
-									return
-								}
-							}
-
-							if updated.Privilege != selected.Privilege {
-								err = acService.ChangePrivilege(
-									updated.ID,
-									updated.Privilege,
-								)
-
-								if err != nil {
-									fyne.Do(func() {
-										editButton.Enable()
-										deleteButton.Enable()
-
-										dialog.ShowError(
-											err,
-											window,
-										)
-									})
-
-									return
-								}
-							}
-
-							if updated.Group != selected.Group {
-								err = acService.ChangeGroup(
-									updated.ID,
-									updated.Group,
-								)
-
-								if err != nil {
-									fyne.Do(func() {
-										editButton.Enable()
-										deleteButton.Enable()
-
-										dialog.ShowError(
-											err,
-											window,
-										)
-									})
-
-									return
-								}
-							}
+							err := acService.Update(updated)
 
 							fyne.Do(func() {
 								editButton.Enable()
+								revokeButton.Enable()
 								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(err, window)
+									return
+								}
 
 								dialog.ShowInformation(
 									"Success",
-									"Access control berhasil diperbarui.",
+									"Access control updated successfully.",
 									window,
 								)
 
@@ -319,41 +232,99 @@ func New(
 				)
 			}
 
-			deleteButton.OnTapped = func() {
+			revokeButton.OnTapped = func() {
+				current := acData
+				newRevoked := !current.Revoked
+
+				action := "revoke"
+				if !newRevoked {
+					action = "restore"
+				}
+
 				dialog.ShowConfirm(
-					"Delete Access Control",
-					"Access control \""+
-						acData.Name+
-						"\" will be deleted. Continue?",
+					"Confirm Permission Status",
+					"Are you sure you want to "+
+						action+
+						" permission \""+
+						current.Name+
+						"\"?",
 					func(ok bool) {
 						if !ok {
 							return
 						}
 
 						editButton.Disable()
+						revokeButton.Disable()
 						deleteButton.Disable()
 
 						go func() {
-							err := acService.DeleteAccessControl(
-								acData.ID,
+							err := acService.SetRevoked(
+								current.ID,
+								newRevoked,
 							)
 
 							fyne.Do(func() {
 								editButton.Enable()
+								revokeButton.Enable()
 								deleteButton.Enable()
 
 								if err != nil {
-									dialog.ShowError(
-										err,
-										window,
-									)
+									dialog.ShowError(err, window)
+									return
+								}
 
+								message := "Permission revoked successfully."
+								if !newRevoked {
+									message = "Permission restored successfully."
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									message,
+									window,
+								)
+
+								reload()
+							})
+						}()
+					},
+					window,
+				)
+			}
+
+			deleteButton.OnTapped = func() {
+				current := acData
+
+				dialog.ShowConfirm(
+					"Delete Access Control",
+					"Are you sure you want to permanently delete access control \""+
+						current.Name+
+						"\"? This action cannot be undone.",
+					func(ok bool) {
+						if !ok {
+							return
+						}
+
+						editButton.Disable()
+						revokeButton.Disable()
+						deleteButton.Disable()
+
+						go func() {
+							err := acService.DeleteAccessControl(current.ID)
+
+							fyne.Do(func() {
+								editButton.Enable()
+								revokeButton.Enable()
+								deleteButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(err, window)
 									return
 								}
 
 								dialog.ShowInformation(
 									"Success",
-									"Access control berhasil dihapus.",
+									"Access control deleted successfully.",
 									window,
 								)
 
@@ -368,7 +339,6 @@ func New(
 	)
 
 	var newEntryButton *widget.Button
-
 	newEntryButton = widget.NewButtonWithIcon(
 		"New",
 		theme.ContentAddIcon(),
@@ -376,45 +346,36 @@ func New(
 			showForm(
 				window,
 				nil,
+				allGroups,
 				func(newPermission *entity.Permission) {
 					newEntryButton.Disable()
 
 					go func() {
-						_, _, keyPair, err := acService.Create(
-							newPermission.Name,
-							newPermission.Privilege,
-							newPermission.Group,
-						)
+						_, _, keyPair, err := acService.Create(newPermission)
 
 						fyne.Do(func() {
 							newEntryButton.Enable()
 
 							if err != nil {
-								dialog.ShowError(
-									err,
-									window,
-								)
-
+								dialog.ShowError(err, window)
 								return
 							}
 
 							dialog.ShowInformation(
 								"Success",
-								"Access control berhasil dibuat.",
+								"Access control created successfully.",
 								window,
 							)
 
 							reload()
 
-							if keyPair == nil {
-								return
+							if keyPair != nil {
+								showKeyPair(
+									window,
+									keyPair.PublicKey,
+									keyPair.PrivateKey,
+								)
 							}
-
-							showKeyPair(
-								window,
-								keyPair.PublicKey,
-								keyPair.PrivateKey,
-							)
 						})
 					}()
 				},
@@ -422,11 +383,24 @@ func New(
 		},
 	)
 
+	manageGroupsButton := widget.NewButtonWithIcon(
+		"Manage Groups",
+		theme.SettingsIcon(),
+		func() {
+			showManageGroups()
+		},
+	)
+
+	toolbarActions := container.NewHBox(
+		manageGroupsButton,
+		newEntryButton,
+	)
+
 	toolbar := container.NewBorder(
 		nil,
 		nil,
 		nil,
-		newEntryButton,
+		toolbarActions,
 		search,
 	)
 
@@ -438,9 +412,7 @@ func New(
 		entryList,
 	)
 
-	content.Objects = []fyne.CanvasObject{
-		loadingView.Content,
-	}
+	content.Objects = []fyne.CanvasObject{loadingView.Content}
 
 	entryList.OnSelected = func(id widget.ListItemID) {
 		if id < 0 || id >= len(filteredACL) {
@@ -457,20 +429,13 @@ func New(
 			acService,
 			&selectedPermission,
 			func() {
-				content.Objects = []fyne.CanvasObject{
-					acContent,
-				}
-
+				content.Objects = []fyne.CanvasObject{acContent}
 				content.Refresh()
 			},
 		)
 
-		content.Objects = []fyne.CanvasObject{
-			userScreen.Content,
-		}
-
+		content.Objects = []fyne.CanvasObject{userScreen.Content}
 		content.Refresh()
-
 		entryList.Unselect(id)
 	}
 
@@ -479,53 +444,222 @@ func New(
 			searchTimer.Stop()
 		}
 
-		searchTimer = time.AfterFunc(
-			200*time.Millisecond,
-			func() {
-				filtered := filterACL(
-					allACL,
-					query,
+		searchTimer = time.AfterFunc(200*time.Millisecond, func() {
+			filtered := filterACL(allACL, query)
+
+			fyne.Do(func() {
+				filteredACL = filtered
+				entryList.UnselectAll()
+				entryList.Refresh()
+			})
+		})
+	}
+
+	showManageGroups = func() {
+		groups, err := acService.ListGroups()
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+
+		var groupList *widget.List
+
+		groupList = widget.NewList(
+			func() int {
+				return len(groups)
+			},
+			func() fyne.CanvasObject {
+				name := widget.NewLabel("")
+
+				edit := widget.NewButtonWithIcon(
+					"",
+					theme.DocumentCreateIcon(),
+					nil,
 				)
 
-				fyne.Do(func() {
-					filteredACL = filtered
+				remove := widget.NewButtonWithIcon(
+					"",
+					theme.DeleteIcon(),
+					nil,
+				)
 
-					entryList.UnselectAll()
-					entryList.Refresh()
-				})
+				return container.NewBorder(
+					nil,
+					nil,
+					nil,
+					container.NewHBox(edit, remove),
+					name,
+				)
+			},
+			func(id widget.ListItemID, obj fyne.CanvasObject) {
+				if id < 0 || id >= len(groups) {
+					return
+				}
+
+				group := groups[id]
+				row := obj.(*fyne.Container)
+
+				name := row.Objects[0].(*widget.Label)
+				buttons := row.Objects[1].(*fyne.Container)
+
+				editButton := buttons.Objects[0].(*widget.Button)
+				deleteButton := buttons.Objects[1].(*widget.Button)
+
+				name.SetText(group.Name)
+
+				editButton.OnTapped = func() {
+					currentGroup := group
+
+					nameEntry := widget.NewEntry()
+					nameEntry.SetText(currentGroup.Name)
+					nameEntry.SetPlaceHolder("Group name")
+
+					dialog.ShowForm(
+						"Update Group Name",
+						"Save",
+						"Cancel",
+						[]*widget.FormItem{
+							widget.NewFormItem("Name", nameEntry),
+						},
+						func(ok bool) {
+							if !ok {
+								return
+							}
+
+							newName := strings.TrimSpace(nameEntry.Text)
+							if newName == "" {
+								dialog.ShowInformation(
+									"Invalid Input",
+									"Group name is required.",
+									window,
+								)
+								return
+							}
+
+							for _, existing := range groups {
+								if existing.ID != currentGroup.ID &&
+									strings.EqualFold(existing.Name, newName) {
+									dialog.ShowInformation(
+										"Duplicate Group",
+										"This group name is already in use.",
+										window,
+									)
+									return
+								}
+							}
+
+							updatedGroup := currentGroup
+							updatedGroup.Name = newName
+
+							editButton.Disable()
+
+							go func() {
+								err := acService.UpdateGroup(&updatedGroup)
+
+								fyne.Do(func() {
+									editButton.Enable()
+
+									if err != nil {
+										dialog.ShowError(err, window)
+										return
+									}
+
+									dialog.ShowInformation(
+										"Success",
+										"Permission group updated successfully.",
+										window,
+									)
+
+									showManageGroups()
+									reload()
+								})
+							}()
+						},
+						window,
+					)
+				}
+
+				deleteButton.OnTapped = func() {
+					currentGroup := group
+
+					dialog.ShowConfirm(
+						"Delete Permission Group",
+						"Are you sure you want to delete permission group \""+
+							currentGroup.Name+
+							"\"? Groups that are still in use may not be deletable.",
+						func(ok bool) {
+							if !ok {
+								return
+							}
+
+							deleteButton.Disable()
+
+							go func() {
+								err := acService.DeleteGroup(currentGroup.ID)
+
+								fyne.Do(func() {
+									deleteButton.Enable()
+
+									if err != nil {
+										dialog.ShowError(err, window)
+										return
+									}
+
+									dialog.ShowInformation(
+										"Success",
+										"Permission group deleted successfully.",
+										window,
+									)
+
+									showManageGroups()
+									reload()
+								})
+							}()
+						},
+						window,
+					)
+				}
 			},
 		)
+
+		d := dialog.NewCustom(
+			"Manage Permission Groups",
+			"Close",
+			container.NewGridWrap(
+				fyne.NewSize(600, 400),
+				groupList,
+			),
+			window,
+		)
+		d.Resize(fyne.NewSize(650, 450))
+		d.Show()
 	}
 
 	go func() {
-		updatedACL, err := acService.List()
+		permissions, err := acService.List()
+		if err != nil {
+			fyne.Do(func() {
+				loadingView.ShowError("Failed to load access controls.")
+				dialog.ShowError(err, window)
+			})
+			return
+		}
+
+		groups, err := acService.ListGroups()
+		if err != nil {
+			fyne.Do(func() {
+				loadingView.ShowError("Failed to load permission groups.")
+				dialog.ShowError(err, window)
+			})
+			return
+		}
 
 		fyne.Do(func() {
-			if err != nil {
-				loadingView.ShowError(
-					"Failed to load access controls.",
-				)
-
-				dialog.ShowError(
-					err,
-					window,
-				)
-
-				return
-			}
-
-			allACL = updatedACL
-
-			filteredACL = filterACL(
-				allACL,
-				search.Text,
-			)
-
+			allACL = permissions
+			allGroups = groups
+			filteredACL = filterACL(allACL, search.Text)
 			entryList.Refresh()
-
-			loadingView.Show(
-				acContent,
-			)
+			loadingView.Show(acContent)
 		})
 	}()
 
@@ -537,22 +671,21 @@ func New(
 func showForm(
 	window fyne.Window,
 	selectedPermission *entity.Permission,
+	groups []entity.PermissionGroup,
 	onSave func(permission *entity.Permission),
 ) {
 	isEdit := selectedPermission != nil
 
 	var permission entity.Permission
-
 	if isEdit {
 		permission = *selectedPermission
+	} else {
+		permission.AutoApprove = false
 	}
 
 	nameEntry := widget.NewEntry()
 	nameEntry.SetText(permission.Name)
-
-	groupEntry := widget.NewEntry()
-	groupEntry.SetText(permission.Group)
-	groupEntry.SetPlaceHolder("Permission group...")
+	nameEntry.SetPlaceHolder("Permission name...")
 
 	privilegeRadio := widget.NewRadioGroup(
 		[]string{
@@ -562,84 +695,153 @@ func showForm(
 		},
 		nil,
 	)
-
 	privilegeRadio.Horizontal = false
 
 	if permission.Privilege.IsValid() {
-		privilegeRadio.SetSelected(
-			string(permission.Privilege),
-		)
+		privilegeRadio.SetSelected(string(permission.Privilege))
 	} else {
-		privilegeRadio.SetSelected(
-			string(entity.PrivilegeRead),
-		)
+		privilegeRadio.SetSelected(string(entity.PrivilegeRead))
 	}
+
+	groupOptions := make([]string, 0, len(groups))
+	groupByName := make(map[string]entity.PermissionGroup)
+	groupByID := make(map[string]entity.PermissionGroup)
+
+	for _, group := range groups {
+		groupOptions = append(groupOptions, group.Name)
+		groupByName[strings.ToLower(strings.TrimSpace(group.Name))] = group
+		groupByID[group.ID] = group
+	}
+
+	groupEntry := widget.NewSelectEntry(groupOptions)
+	groupEntry.SetPlaceHolder("Select a permission group")
+
+	var selectedGroup *entity.PermissionGroup
+
+	if isEdit {
+		if permission.GroupID != nil && *permission.GroupID != "" {
+			if group, exists := groupByID[*permission.GroupID]; exists {
+				selected := group
+				selectedGroup = &selected
+			}
+		}
+
+		if selectedGroup == nil && permission.Group.ID != "" {
+			if group, exists := groupByID[permission.Group.ID]; exists {
+				selected := group
+				selectedGroup = &selected
+			}
+		}
+
+		if selectedGroup == nil && permission.Group.Name != "" {
+			key := strings.ToLower(strings.TrimSpace(permission.Group.Name))
+			if group, exists := groupByName[key]; exists {
+				selected := group
+				selectedGroup = &selected
+			}
+		}
+
+		if selectedGroup == nil &&
+			(permission.Group.ID != "" || permission.Group.Name != "") {
+			selected := permission.Group
+			selectedGroup = &selected
+		}
+	}
+
+	if selectedGroup != nil {
+		groupEntry.SetText(selectedGroup.Name)
+	} else if permission.Group.Name != "" {
+		groupEntry.SetText(permission.Group.Name)
+	}
+
+	groupEntry.OnChanged = func(value string) {
+		key := strings.ToLower(strings.TrimSpace(value))
+
+		if group, exists := groupByName[key]; exists {
+			selected := group
+			selectedGroup = &selected
+		} else {
+			selectedGroup = nil
+		}
+	}
+
+	autoApprove := permission.AutoApprove
+	autoApproveButton := widget.NewButton("", nil)
+
+	updateAutoApproveButton := func() {
+		if autoApprove {
+			autoApproveButton.SetText("Auto Approval: ON")
+		} else {
+			autoApproveButton.SetText("Auto Approval: OFF")
+		}
+	}
+
+	autoApproveButton.OnTapped = func() {
+		autoApprove = !autoApprove
+		updateAutoApproveButton()
+	}
+
+	updateAutoApproveButton()
 
 	updateGroupState := func(privilege string) {
 		if entity.Privilege(privilege) == entity.PrivilegeAdmin {
 			groupEntry.SetText("")
 			groupEntry.Disable()
+			selectedGroup = nil
 			return
 		}
 
 		groupEntry.Enable()
+
+		if selectedGroup != nil {
+			groupEntry.SetText(selectedGroup.Name)
+			return
+		}
+
+		if len(groups) == 1 && strings.TrimSpace(groupEntry.Text) == "" {
+			group := groups[0]
+			selectedGroup = &group
+			groupEntry.SetText(group.Name)
+		}
 	}
 
-	updateGroupState(
-		privilegeRadio.Selected,
-	)
+	updateGroupState(privilegeRadio.Selected)
 
 	privilegeRadio.OnChanged = func(selected string) {
 		updateGroupState(selected)
 	}
 
 	form := widget.NewForm(
-		widget.NewFormItem(
-			"Name",
-			nameEntry,
-		),
-		widget.NewFormItem(
-			"Privilege",
-			privilegeRadio,
-		),
-		widget.NewFormItem(
-			"Group",
-			groupEntry,
-		),
-	)
-
-	formContainer := container.NewGridWrap(
-		fyne.NewSize(650, 420),
-		form,
+		widget.NewFormItem("Name", nameEntry),
+		widget.NewFormItem("Privilege", privilegeRadio),
+		widget.NewFormItem("Group", groupEntry),
+		widget.NewFormItem("Auto Approval", autoApproveButton),
 	)
 
 	title := "New Access Control"
-
 	if isEdit {
 		title = "Edit Access Control"
 	}
 
-	dialog.ShowCustomConfirm(
+	formContent := container.NewVBox(form)
+
+	d := dialog.NewCustomConfirm(
 		title,
 		"Save",
 		"Cancel",
-		formContainer,
+		container.NewScroll(formContent),
 		func(ok bool) {
 			if !ok {
 				return
 			}
 
-			name := strings.TrimSpace(
-				nameEntry.Text,
-			)
-
+			name := strings.TrimSpace(nameEntry.Text)
 			if name == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
 					"Name is required.",
 					window,
 				)
-
 				return
 			}
 
@@ -649,27 +851,65 @@ func showForm(
 					"Privilege is required.",
 					window,
 				)
-
 				return
 			}
 
 			permission.Name = name
-			permission.Privilege = entity.Privilege(
-				privilegeRadio.Selected,
-			)
+			permission.Privilege = entity.Privilege(privilegeRadio.Selected)
+			permission.AutoApprove = autoApprove
 
 			if permission.Privilege == entity.PrivilegeAdmin {
-				permission.Group = ""
+				permission.Group = entity.PermissionGroup{}
+				permission.GroupID = nil
 			} else {
-				permission.Group = strings.TrimSpace(
-					groupEntry.Text,
-				)
+				groupName := strings.TrimSpace(groupEntry.Text)
+				if groupName == "" {
+					dialog.ShowInformation(
+						"Invalid Input",
+						"Permission group is required.",
+						window,
+					)
+					return
+				}
+
+				key := strings.ToLower(strings.TrimSpace(groupName))
+
+				if group, exists := groupByName[key]; exists {
+					permission.Group = group
+				} else if selectedGroup != nil &&
+					strings.EqualFold(selectedGroup.Name, groupName) {
+					permission.Group = *selectedGroup
+				} else {
+					dialog.ShowInformation(
+						"Invalid Permission Group",
+						"Select an existing permission group.",
+						window,
+					)
+					return
+				}
+
+				if permission.Group.ID == "" {
+					dialog.ShowInformation(
+						"Invalid Permission Group",
+						"The selected permission group has no valid ID.",
+						window,
+					)
+					return
+				}
+
+				groupID := permission.Group.ID
+				permission.GroupID = &groupID
 			}
 
-			onSave(&permission)
+			if onSave != nil {
+				onSave(&permission)
+			}
 		},
 		window,
 	)
+
+	d.Resize(fyne.NewSize(700, 500))
+	d.Show()
 }
 
 func showKeyPair(
@@ -677,42 +917,46 @@ func showKeyPair(
 	publicKey string,
 	privateKey string,
 ) {
-	publicKeyEntry := widget.NewMultiLineEntry()
-	publicKeyEntry.SetText(publicKey)
-	publicKeyEntry.SetMinRowsVisible(6)
-	publicKeyEntry.Disable()
+	secretKey, err := util.EncodeSecretKey(publicKey, privateKey)
+	if err != nil {
+		dialog.ShowError(err, window)
+		return
+	}
 
-	privateKeyEntry := widget.NewMultiLineEntry()
-	privateKeyEntry.SetText(privateKey)
-	privateKeyEntry.SetMinRowsVisible(8)
-	privateKeyEntry.Disable()
+	secretEntry := widget.NewMultiLineEntry()
+	secretEntry.SetText(secretKey)
+	secretEntry.SetMinRowsVisible(8)
+	secretEntry.Wrapping = fyne.TextWrapBreak
+
+	copyButton := widget.NewButtonWithIcon(
+		"Copy Secret Key",
+		theme.ContentCopyIcon(),
+		func() {
+			window.Clipboard().SetContent(secretKey)
+
+			dialog.ShowInformation(
+				"Copied",
+				"Secret key copied to clipboard.",
+				window,
+			)
+		},
+	)
 
 	content := container.NewVBox(
 		widget.NewLabelWithStyle(
-			"Public Key",
+			"Secret Key (Base64)",
 			fyne.TextAlignLeading,
-			fyne.TextStyle{
-				Bold: true,
-			},
+			fyne.TextStyle{Bold: true},
 		),
-		publicKeyEntry,
-
-		widget.NewLabelWithStyle(
-			"Private Key",
-			fyne.TextAlignLeading,
-			fyne.TextStyle{
-				Bold: true,
-			},
-		),
-		privateKeyEntry,
-
+		secretEntry,
 		widget.NewLabel(
-			"The private key is only displayed now. Save it securely before closing this dialog.",
+			"The secret key contains the public and private keys in encoded format. Store it securely.",
 		),
+		copyButton,
 	)
 
 	dialog.ShowCustom(
-		"Access Control Key Pair",
+		"Access Control Secret Key",
 		"Close",
 		content,
 		window,
