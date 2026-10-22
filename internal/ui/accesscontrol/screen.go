@@ -86,7 +86,7 @@ func New(
 				return
 			}
 
-			groups, err := acService.ListGroups()
+			groups, err := acService.GroupList()
 			if err != nil {
 				fyne.Do(func() {
 					dialog.ShowError(err, window)
@@ -351,7 +351,7 @@ func New(
 					newEntryButton.Disable()
 
 					go func() {
-						_, _, keyPair, err := acService.Create(newPermission)
+						_, keyPair, err := acService.Create(newPermission)
 
 						fyne.Do(func() {
 							newEntryButton.Enable()
@@ -456,7 +456,7 @@ func New(
 	}
 
 	showManageGroups = func() {
-		groups, err := acService.ListGroups()
+		groups, err := acService.GroupList()
 		if err != nil {
 			dialog.ShowError(err, window)
 			return
@@ -645,7 +645,7 @@ func New(
 			return
 		}
 
-		groups, err := acService.ListGroups()
+		groups, err := acService.GroupList()
 		if err != nil {
 			fyne.Do(func() {
 				loadingView.ShowError("Failed to load permission groups.")
@@ -679,8 +679,6 @@ func showForm(
 	var permission entity.Permission
 	if isEdit {
 		permission = *selectedPermission
-	} else {
-		permission.AutoApprove = false
 	}
 
 	nameEntry := widget.NewEntry()
@@ -704,65 +702,27 @@ func showForm(
 	}
 
 	groupOptions := make([]string, 0, len(groups))
-	groupByName := make(map[string]entity.PermissionGroup)
-	groupByID := make(map[string]entity.PermissionGroup)
+	groupByName := make(map[string]entity.PermissionGroup, len(groups))
 
 	for _, group := range groups {
 		groupOptions = append(groupOptions, group.Name)
 		groupByName[strings.ToLower(strings.TrimSpace(group.Name))] = group
-		groupByID[group.ID] = group
 	}
 
 	groupEntry := widget.NewSelectEntry(groupOptions)
-	groupEntry.SetPlaceHolder("Select a permission group")
+	groupEntry.SetPlaceHolder("Enter or select a permission group")
 
-	var selectedGroup *entity.PermissionGroup
-
+	// Pertahankan group yang digunakan saat edit.
 	if isEdit {
-		if permission.GroupID != nil && *permission.GroupID != "" {
-			if group, exists := groupByID[*permission.GroupID]; exists {
-				selected := group
-				selectedGroup = &selected
-			}
-		}
-
-		if selectedGroup == nil && permission.Group.ID != "" {
-			if group, exists := groupByID[permission.Group.ID]; exists {
-				selected := group
-				selectedGroup = &selected
-			}
-		}
-
-		if selectedGroup == nil && permission.Group.Name != "" {
-			key := strings.ToLower(strings.TrimSpace(permission.Group.Name))
-			if group, exists := groupByName[key]; exists {
-				selected := group
-				selectedGroup = &selected
-			}
-		}
-
-		if selectedGroup == nil &&
-			(permission.Group.ID != "" || permission.Group.Name != "") {
-			selected := permission.Group
-			selectedGroup = &selected
+		if group, exists := groupByName[strings.ToLower(strings.TrimSpace(permission.Group.Name))]; exists {
+			groupEntry.SetText(group.Name)
+		} else if permission.Group.Name != "" {
+			groupEntry.SetText(permission.Group.Name)
 		}
 	}
 
-	if selectedGroup != nil {
-		groupEntry.SetText(selectedGroup.Name)
-	} else if permission.Group.Name != "" {
-		groupEntry.SetText(permission.Group.Name)
-	}
-
-	groupEntry.OnChanged = func(value string) {
-		key := strings.ToLower(strings.TrimSpace(value))
-
-		if group, exists := groupByName[key]; exists {
-			selected := group
-			selectedGroup = &selected
-		} else {
-			selectedGroup = nil
-		}
+	if groupEntry.Text == "" && len(groups) == 1 {
+		groupEntry.SetText(groups[0].Name)
 	}
 
 	autoApprove := permission.AutoApprove
@@ -783,34 +743,6 @@ func showForm(
 
 	updateAutoApproveButton()
 
-	updateGroupState := func(privilege string) {
-		if entity.Privilege(privilege) == entity.PrivilegeAdmin {
-			groupEntry.SetText("")
-			groupEntry.Disable()
-			selectedGroup = nil
-			return
-		}
-
-		groupEntry.Enable()
-
-		if selectedGroup != nil {
-			groupEntry.SetText(selectedGroup.Name)
-			return
-		}
-
-		if len(groups) == 1 && strings.TrimSpace(groupEntry.Text) == "" {
-			group := groups[0]
-			selectedGroup = &group
-			groupEntry.SetText(group.Name)
-		}
-	}
-
-	updateGroupState(privilegeRadio.Selected)
-
-	privilegeRadio.OnChanged = func(selected string) {
-		updateGroupState(selected)
-	}
-
 	form := widget.NewForm(
 		widget.NewFormItem("Name", nameEntry),
 		widget.NewFormItem("Privilege", privilegeRadio),
@@ -823,13 +755,11 @@ func showForm(
 		title = "Edit Access Control"
 	}
 
-	formContent := container.NewVBox(form)
-
 	d := dialog.NewCustomConfirm(
 		title,
 		"Save",
 		"Cancel",
-		container.NewScroll(formContent),
+		container.NewScroll(container.NewVBox(form)),
 		func(ok bool) {
 			if !ok {
 				return
@@ -837,68 +767,40 @@ func showForm(
 
 			name := strings.TrimSpace(nameEntry.Text)
 			if name == "" {
-				dialog.ShowInformation(
-					"Invalid Input",
-					"Name is required.",
-					window,
-				)
+				dialog.ShowInformation("Invalid Input", "Name is required.", window)
 				return
 			}
 
 			if privilegeRadio.Selected == "" {
-				dialog.ShowInformation(
-					"Invalid Input",
-					"Privilege is required.",
-					window,
-				)
+				dialog.ShowInformation("Invalid Input", "Privilege is required.", window)
 				return
 			}
+
+			groupName := strings.TrimSpace(groupEntry.Text)
+			if groupName == "" {
+				dialog.ShowInformation("Invalid Input", "Permission group is required.", window)
+				return
+			}
+
+			key := strings.ToLower(groupName)
 
 			permission.Name = name
 			permission.Privilege = entity.Privilege(privilegeRadio.Selected)
 			permission.AutoApprove = autoApprove
 
-			if permission.Privilege == entity.PrivilegeAdmin {
-				permission.Group = entity.PermissionGroup{}
-				permission.GroupID = nil
+			if group, exists := groupByName[key]; exists {
+				// Group sudah ada, gunakan record existing.
+				permission.Group = group
+				permission.GroupID = group.ID
+				permission.SotID = group.SotID
 			} else {
-				groupName := strings.TrimSpace(groupEntry.Text)
-				if groupName == "" {
-					dialog.ShowInformation(
-						"Invalid Input",
-						"Permission group is required.",
-						window,
-					)
-					return
+				// Group baru: service harus membuat group dahulu,
+				// lalu mengisi GroupID dan SotID sebelum menyimpan permission.
+				permission.Group = entity.PermissionGroup{
+					Name: groupName,
 				}
-
-				key := strings.ToLower(strings.TrimSpace(groupName))
-
-				if group, exists := groupByName[key]; exists {
-					permission.Group = group
-				} else if selectedGroup != nil &&
-					strings.EqualFold(selectedGroup.Name, groupName) {
-					permission.Group = *selectedGroup
-				} else {
-					dialog.ShowInformation(
-						"Invalid Permission Group",
-						"Select an existing permission group.",
-						window,
-					)
-					return
-				}
-
-				if permission.Group.ID == "" {
-					dialog.ShowInformation(
-						"Invalid Permission Group",
-						"The selected permission group has no valid ID.",
-						window,
-					)
-					return
-				}
-
-				groupID := permission.Group.ID
-				permission.GroupID = &groupID
+				permission.GroupID = ""
+				permission.SotID = ""
 			}
 
 			if onSave != nil {

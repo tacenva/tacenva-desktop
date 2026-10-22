@@ -210,7 +210,7 @@ func New(
 					window,
 					selectedSot.Hostname,
 					func() {
-						if _, err := sotService.Del(&selectedSot); err != nil {
+						if err := sotService.Delete(&selectedSot); err != nil {
 							dialog.ShowError(err, window)
 							return
 						}

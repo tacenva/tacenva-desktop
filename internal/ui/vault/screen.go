@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -40,76 +41,55 @@ func New(
 		sotService,
 	)
 
+	loadPermissionGroups := func() ([]entity.PermissionGroup, error) {
+		return vaultService.ListPermissionGroup()
+	}
+
 	var searchTimer *time.Timer
 
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search collection...")
 
-	allVaultAccesses := make(
-		[]entity.VaultAccess,
-		0,
-	)
-
-	filteredVaultAccesses := make(
-		[]entity.VaultAccess,
-		0,
-	)
+	allVault := make([]entity.Vault, 0)
+	filteredVaults := make([]entity.Vault, 0)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
+	var newEntryButton *widget.Button
 
 	content := container.NewMax()
+	loadingView := loading.New("Loading collections...")
 
-	loadingView := loading.New(
-		"Loading collections...",
-	)
-
-	filterVaultAccesses := func(
-		accesses []entity.VaultAccess,
+	filterVault := func(
+		vaults []entity.Vault,
 		query string,
-	) []entity.VaultAccess {
-		query = strings.ToLower(
-			strings.TrimSpace(query),
-		)
+	) []entity.Vault {
+		query = strings.ToLower(strings.TrimSpace(query))
 
 		if query == "" {
-			return append(
-				[]entity.VaultAccess(nil),
-				accesses...,
-			)
+			return append([]entity.Vault(nil), vaults...)
 		}
 
-		filtered := make(
-			[]entity.VaultAccess,
-			0,
-			len(accesses),
-		)
+		filtered := make([]entity.Vault, 0, len(vaults))
 
-		for _, vaultAccess := range accesses {
+		for _, vault := range vaults {
 			if strings.Contains(
-				strings.ToLower(
-					vaultAccess.Vault.Name,
-				),
+				strings.ToLower(vault.Name),
 				query,
 			) {
-				filtered = append(
-					filtered,
-					vaultAccess,
-				)
+				filtered = append(filtered, vault)
 			}
 		}
 
 		return filtered
 	}
 
-	applyVaultAccesses := func(
-		vaultAccesses []entity.VaultAccess,
+	applyVault := func(
+		vaults []entity.Vault,
 		needSync bool,
 	) {
-		allVaultAccesses = vaultAccesses
-
-		filteredVaultAccesses = filterVaultAccesses(
-			allVaultAccesses,
+		filteredVaults = filterVault(
+			vaults,
 			search.Text,
 		)
 
@@ -123,42 +103,28 @@ func New(
 		entryList.Refresh()
 	}
 
-	reload := func() {
+	var reload func()
+
+	reload = func() {
 		syncButton.Disable()
 
 		go func() {
-			updatedVaultAccesses, needSync, err := vaultService.List()
+			updatedVault, needSync, err := vaultService.List()
 
 			fyne.Do(func() {
 				if err != nil {
-					if updatedVaultAccesses == nil {
-						dialog.ShowError(
-							err,
-							window,
-						)
-
+					if updatedVault == nil {
+						dialog.ShowError(err, window)
 						syncButton.Enable()
-
 						return
 					}
 
-					applyVaultAccesses(
-						updatedVaultAccesses,
-						needSync,
-					)
-
-					dialog.ShowError(
-						err,
-						window,
-					)
-
+					applyVault(updatedVault, needSync)
+					dialog.ShowError(err, window)
 					return
 				}
 
-				applyVaultAccesses(
-					updatedVaultAccesses,
-					needSync,
-				)
+				applyVault(updatedVault, needSync)
 			})
 		}()
 	}
@@ -175,12 +141,7 @@ func New(
 				fyne.Do(func() {
 					if err != nil {
 						syncButton.Enable()
-
-						dialog.ShowError(
-							err,
-							window,
-						)
-
+						dialog.ShowError(err, window)
 						return
 					}
 
@@ -190,9 +151,34 @@ func New(
 		},
 	)
 
+	// Membuka form dengan group dari service asli.
+	openVaultForm := func(
+		selectedVault *entity.Vault,
+		onSave func(*entity.Vault, []string),
+	) {
+		go func() {
+			groups, err := loadPermissionGroups()
+
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(err, window)
+					return
+				}
+
+				showForm(
+					window,
+					selectedVault,
+					context.SelectedSoT.GroupID,
+					groups,
+					onSave,
+				)
+			})
+		}()
+	}
+
 	entryList = widget.NewList(
 		func() int {
-			return len(filteredVaultAccesses)
+			return len(filteredVaults)
 		},
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
@@ -220,27 +206,15 @@ func New(
 			)
 
 			nameCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
-				name,
+				nil, nil, nil, nil, name,
 			)
 
 			dateCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
-				updatedAt,
+				nil, nil, nil, nil, updatedAt,
 			)
 
 			actionCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				actions,
-				nil,
+				nil, nil, nil, actions, nil,
 			)
 
 			return container.NewGridWithColumns(
@@ -254,13 +228,11 @@ func New(
 			id widget.ListItemID,
 			obj fyne.CanvasObject,
 		) {
-			if id < 0 ||
-				id >= len(filteredVaultAccesses) {
+			if id < 0 || id >= len(filteredVaults) {
 				return
 			}
 
-			vaultAccess := filteredVaultAccesses[id]
-
+			vault := filteredVaults[id]
 			row := obj.(*fyne.Container)
 
 			nameCell := row.Objects[0].(*fyne.Container)
@@ -274,41 +246,33 @@ func New(
 			updateButton := actions.Objects[0].(*widget.Button)
 			deleteButton := actions.Objects[1].(*widget.Button)
 
-			name.SetText(
-				vaultAccess.Vault.Name,
-			)
-
+			name.SetText(vault.Name)
 			updatedAt.SetText(
-				vaultAccess.Vault.UpdatedAt.Format(
-					"02 Jan 2006 15:04",
-				),
+				vault.UpdatedAt.Format("02 Jan 2006 15:04"),
 			)
 
 			updateButton.OnTapped = func() {
-				selectedVault := vaultAccess.Vault
+				selectedVault := vault
 
-				showForm(
-					window,
+				openVaultForm(
 					&selectedVault,
-					func(updated *entity.Vault) {
+					func(
+						updated *entity.Vault,
+						groupIDs []string,
+					) {
 						updateButton.Disable()
 						deleteButton.Disable()
 
 						go func() {
-							err := vaultService.UpdateVault(
-								updated,
-							)
+							updated.GroupIDs = groupIDs
+							err := vaultService.UpdateVault(updated)
 
 							fyne.Do(func() {
 								updateButton.Enable()
 								deleteButton.Enable()
 
 								if err != nil {
-									dialog.ShowError(
-										err,
-										window,
-									)
-
+									dialog.ShowError(err, window)
 									return
 								}
 
@@ -328,8 +292,7 @@ func New(
 			deleteButton.OnTapped = func() {
 				dialog.ShowConfirm(
 					"Delete Vault",
-					"Vault \""+
-						vaultAccess.Vault.Name+
+					"Vault \""+vault.Name+
 						"\" will be deleted. Continue?",
 					func(ok bool) {
 						if !ok {
@@ -341,7 +304,7 @@ func New(
 
 						go func() {
 							err := vaultService.DeleteVault(
-								&vaultAccess.Vault,
+								&vault,
 							)
 
 							fyne.Do(func() {
@@ -349,11 +312,7 @@ func New(
 								deleteButton.Enable()
 
 								if err != nil {
-									dialog.ShowError(
-										err,
-										window,
-									)
-
+									dialog.ShowError(err, window)
 									return
 								}
 
@@ -373,32 +332,29 @@ func New(
 		},
 	)
 
-	var newEntryButton *widget.Button
-
 	newEntryButton = widget.NewButtonWithIcon(
 		"New",
 		theme.ContentAddIcon(),
 		func() {
-			showForm(
-				window,
+			openVaultForm(
 				nil,
-				func(newVault *entity.Vault) {
+				func(
+					newVault *entity.Vault,
+					groupIDs []string,
+				) {
 					newEntryButton.Disable()
 
 					go func() {
-						_, err := vaultService.CreateVault(
+						err := vaultService.CreateVault(
 							newVault.Name,
+							groupIDs,
 						)
 
 						fyne.Do(func() {
 							newEntryButton.Enable()
 
 							if err != nil {
-								dialog.ShowError(
-									err,
-									window,
-								)
-
+								dialog.ShowError(err, window)
 								return
 							}
 
@@ -420,10 +376,7 @@ func New(
 		nil,
 		nil,
 		nil,
-		container.NewHBox(
-			syncButton,
-			newEntryButton,
-		),
+		container.NewHBox(syncButton, newEntryButton),
 		search,
 	)
 
@@ -435,15 +388,20 @@ func New(
 		entryList,
 	)
 
-	entryList.OnSelected = func(
-		id widget.ListItemID,
-	) {
-		if id < 0 ||
-			id >= len(filteredVaultAccesses) {
+	entryList.OnSelected = func(id widget.ListItemID) {
+		if id < 0 || id >= len(filteredVaults) {
 			return
 		}
 
-		selectedVaultAccess := filteredVaultAccesses[id]
+		selectedVault := filteredVaults[id]
+		wrappedKey := selectedVault.WrappedKey
+		if !context.IsRemote {
+			var err error
+			wrappedKey, err = vaultService.GetWrappedKey(selectedVault.ID)
+			if err != nil {
+				return
+			}
+		}
 
 		recordScreen := NewRecordScreen(
 			window,
@@ -452,12 +410,12 @@ func New(
 			masterKey,
 			coreService,
 			sotService,
-			&selectedVaultAccess,
+			&selectedVault,
+			wrappedKey,
 			func() {
 				content.Objects = []fyne.CanvasObject{
 					vaultContent,
 				}
-
 				content.Refresh()
 			},
 		)
@@ -465,7 +423,6 @@ func New(
 		content.Objects = []fyne.CanvasObject{
 			recordScreen.Content,
 		}
-
 		content.Refresh()
 
 		entryList.Unselect(id)
@@ -479,14 +436,13 @@ func New(
 		searchTimer = time.AfterFunc(
 			200*time.Millisecond,
 			func() {
-				filtered := filterVaultAccesses(
-					allVaultAccesses,
+				filtered := filterVault(
+					allVault,
 					query,
 				)
 
 				fyne.Do(func() {
-					filteredVaultAccesses = filtered
-
+					filteredVaults = filtered
 					entryList.UnselectAll()
 					entryList.Refresh()
 				})
@@ -499,8 +455,7 @@ func New(
 	}
 
 	go func() {
-		updatedVaultAccesses, needSync, err :=
-			vaultService.List()
+		updatedVaultAccesses, needSync, err := vaultService.List()
 
 		fyne.Do(func() {
 			if err != nil {
@@ -508,40 +463,18 @@ func New(
 					loadingView.ShowError(
 						"Failed to load collections.",
 					)
-
-					dialog.ShowError(
-						err,
-						window,
-					)
-
+					dialog.ShowError(err, window)
 					return
 				}
 
-				applyVaultAccesses(
-					updatedVaultAccesses,
-					needSync,
-				)
-
-				loadingView.Show(
-					vaultContent,
-				)
-
-				dialog.ShowError(
-					err,
-					window,
-				)
-
+				applyVault(updatedVaultAccesses, needSync)
+				loadingView.Show(vaultContent)
+				dialog.ShowError(err, window)
 				return
 			}
 
-			applyVaultAccesses(
-				updatedVaultAccesses,
-				needSync,
-			)
-
-			loadingView.Show(
-				vaultContent,
-			)
+			applyVault(updatedVaultAccesses, needSync)
+			loadingView.Show(vaultContent)
 		})
 	}()
 
@@ -553,36 +486,162 @@ func New(
 func showForm(
 	window fyne.Window,
 	selectedVault *entity.Vault,
-	onSave func(vault *entity.Vault),
+	userGroupID string,
+	groups []entity.PermissionGroup,
+	onSave func(vault *entity.Vault, groupIDs []string),
 ) {
 	isEdit := selectedVault != nil
 
 	var vault entity.Vault
-
 	if isEdit {
 		vault = *selectedVault
 	}
 
 	nameEntry := widget.NewEntry()
 	nameEntry.SetText(vault.Name)
+	nameEntry.SetPlaceHolder("Vault name...")
 
-	form := widget.NewForm(
-		widget.NewFormItem(
-			"Name",
-			nameEntry,
+	searchEntry := widget.NewEntry()
+	searchEntry.SetPlaceHolder("Search groups...")
+
+	selectedGroups := make(map[string]bool)
+
+	if len(groups) > 0 {
+		selectedGroups[userGroupID] = true
+	}
+
+	groupList := container.NewVBox()
+
+	var updateGroupList func(string)
+
+	updateGroupList = func(query string) {
+		query = strings.ToLower(strings.TrimSpace(query))
+		groupList.Objects = nil
+
+		for _, group := range groups {
+			if query != "" &&
+				!strings.Contains(strings.ToLower(group.Name), query) {
+				continue
+			}
+
+			groupID := group.ID
+
+			check := widget.NewCheck(
+				group.Name,
+				func(checked bool) {
+					if groupID == userGroupID {
+						selectedGroups[groupID] = true
+						return
+					}
+
+					selectedGroups[groupID] = checked
+				},
+			)
+
+			check.SetChecked(selectedGroups[groupID])
+
+			if groupID == userGroupID {
+				check.Disable()
+			}
+
+			groupList.Add(check)
+		}
+
+		groupList.Refresh()
+	}
+
+	searchEntry.OnChanged = updateGroupList
+
+	selectAll := widget.NewButton("Select All", func() {
+		query := strings.ToLower(strings.TrimSpace(searchEntry.Text))
+
+		for _, group := range groups {
+			if query == "" ||
+				strings.Contains(strings.ToLower(group.Name), query) {
+				selectedGroups[group.ID] = true
+			}
+		}
+
+		if userGroupID != "" {
+			selectedGroups[userGroupID] = true
+		}
+
+		updateGroupList(searchEntry.Text)
+	})
+
+	clearSelection := widget.NewButton("Deselect All", func() {
+		query := strings.ToLower(strings.TrimSpace(searchEntry.Text))
+
+		for _, group := range groups {
+			if group.ID == userGroupID {
+				continue
+			}
+
+			if query == "" ||
+				strings.Contains(strings.ToLower(group.Name), query) {
+				delete(selectedGroups, group.ID)
+			}
+		}
+
+		if userGroupID != "" {
+			selectedGroups[userGroupID] = true
+		}
+
+		updateGroupList(searchEntry.Text)
+	})
+
+	refreshButton := widget.NewButtonWithIcon(
+		"Refresh",
+		theme.ViewRefreshIcon(),
+		func() {
+			// Data group di-load dari service ketika form dibuka.
+			// Tombol ini menyegarkan tampilan berdasarkan data saat ini.
+			updateGroupList(searchEntry.Text)
+		},
+	)
+
+	groupToolbar := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		container.NewHBox(
+			selectAll,
+			clearSelection,
+			refreshButton,
 		),
+		searchEntry,
+	)
+
+	groupScroll := container.NewVScroll(groupList)
+	groupScroll.SetMinSize(fyne.NewSize(420, 220))
+
+	groupContent := container.NewBorder(
+		groupToolbar,
+		nil,
+		nil,
+		nil,
+		groupScroll,
+	)
+
+	nameRow := newLabelRow("Name", nameEntry)
+	groupsRow := newLabelRow("Groups", groupContent)
+
+	formContent := container.NewVBox(
+		nameRow,
+		groupsRow,
 	)
 
 	formContainer := container.NewGridWrap(
-		fyne.NewSize(650, 420),
-		form,
+		fyne.NewSize(760, 340),
+		formContent,
 	)
 
 	title := "New Vault"
-
 	if isEdit {
 		title = "Edit Vault"
 	}
+
+	updateGroupList("")
 
 	dialog.ShowCustomConfirm(
 		title,
@@ -594,24 +653,94 @@ func showForm(
 				return
 			}
 
-			name := strings.TrimSpace(
-				nameEntry.Text,
-			)
-
+			name := strings.TrimSpace(nameEntry.Text)
 			if name == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
 					"Name is required.",
 					window,
 				)
-
 				return
 			}
 
+			if userGroupID != "" {
+				selectedGroups[userGroupID] = true
+			}
+
+			groupIDs := make([]string, 0, len(selectedGroups))
+			for id, selected := range selectedGroups {
+				if selected {
+					groupIDs = append(groupIDs, id)
+				}
+			}
+
+			sort.Strings(groupIDs)
 			vault.Name = name
 
-			onSave(&vault)
+			if onSave != nil {
+				onSave(&vault, groupIDs)
+			}
 		},
 		window,
 	)
+}
+
+func newLabelRow(
+	label string,
+	content fyne.CanvasObject,
+) fyne.CanvasObject {
+	return container.New(
+		&labelRowLayout{labelWidth: 80},
+		widget.NewLabel(label),
+		content,
+	)
+}
+
+type labelRowLayout struct {
+	labelWidth float32
+}
+
+func (l *labelRowLayout) Layout(
+	objects []fyne.CanvasObject,
+	size fyne.Size,
+) {
+	if len(objects) < 2 {
+		return
+	}
+
+	label := objects[0]
+	content := objects[1]
+
+	label.Resize(fyne.NewSize(l.labelWidth, size.Height))
+	label.Move(fyne.NewPos(0, 0))
+
+	content.Resize(fyne.NewSize(
+		maxFloat32(0, size.Width-l.labelWidth),
+		size.Height,
+	))
+	content.Move(fyne.NewPos(l.labelWidth, 0))
+}
+
+func (l *labelRowLayout) MinSize(
+	objects []fyne.CanvasObject,
+) fyne.Size {
+	if len(objects) < 2 {
+		return fyne.NewSize(0, 0)
+	}
+
+	labelMin := objects[0].MinSize()
+	contentMin := objects[1].MinSize()
+
+	return fyne.NewSize(
+		l.labelWidth+contentMin.Width,
+		maxFloat32(labelMin.Height, contentMin.Height),
+	)
+}
+
+func maxFloat32(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+
+	return b
 }

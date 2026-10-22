@@ -32,7 +32,8 @@ func NewRecordScreen(
 	masterKey string,
 	coreService *coreApp.Services,
 	sotService *sourceoftruth.Service,
-	vaultAccess *entity.VaultAccess,
+	selectedVault *entity.Vault,
+	wrappedKey string,
 	onBack func(),
 ) *RecordScreen {
 	vaultService := vault.NewService(
@@ -138,7 +139,8 @@ func NewRecordScreen(
 		go func() {
 			updatedVaultRecords, needSync, err :=
 				vaultService.ListRecord(
-					vaultAccess,
+					selectedVault,
+					wrappedKey,
 				)
 
 			fyne.Do(func() {
@@ -176,7 +178,7 @@ func NewRecordScreen(
 	}
 
 	backButton := widget.NewButtonWithIcon(
-		vaultAccess.Vault.Name,
+		selectedVault.Name,
 		theme.NavigateBackIcon(),
 		onBack,
 	)
@@ -189,7 +191,7 @@ func NewRecordScreen(
 
 			go func() {
 				err := vaultService.SyncRecord(
-					vaultAccess,
+					selectedVault,
 				)
 
 				fyne.Do(func() {
@@ -393,8 +395,9 @@ func NewRecordScreen(
 
 						go func() {
 							_, err := vaultService.UpdateRecord(
-								vaultAccess,
+								selectedVault,
 								updated,
+								wrappedKey,
 							)
 
 							fyne.Do(func() {
@@ -439,7 +442,7 @@ func NewRecordScreen(
 
 						go func() {
 							err := vaultService.DeleteRecord(
-								vaultAccess,
+								selectedVault,
 								&record,
 							)
 
@@ -486,8 +489,9 @@ func NewRecordScreen(
 
 					go func() {
 						_, err := vaultService.AppendRecord(
-							vaultAccess,
+							selectedVault,
 							newRecord,
+							wrappedKey,
 						)
 
 						fyne.Do(func() {
@@ -565,7 +569,8 @@ func NewRecordScreen(
 	go func() {
 		updatedVaultRecords, needSync, err :=
 			vaultService.ListRecord(
-				vaultAccess,
+				selectedVault,
+				wrappedKey,
 			)
 
 		fyne.Do(func() {
