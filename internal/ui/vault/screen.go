@@ -138,7 +138,9 @@ func New(
 		theme.ViewRefreshIcon(),
 		func() {
 			syncButton.Disable()
-			newEntryButton.Disable()
+			if newEntryButton != nil {
+				newEntryButton.Disable()
+			}
 
 			runWithLoading(
 				window,
@@ -147,7 +149,9 @@ func New(
 					return vaultService.SyncVault()
 				},
 				func() {
-					newEntryButton.Enable()
+					if newEntryButton != nil {
+						newEntryButton.Enable()
+					}
 					reload()
 				},
 			)
@@ -292,7 +296,9 @@ func New(
 
 						updateButton.Disable()
 						deleteButton.Disable()
-						newEntryButton.Disable()
+						if newEntryButton != nil {
+							newEntryButton.Disable()
+						}
 
 						runWithLoading(
 							window,
@@ -372,8 +378,10 @@ func New(
 						newVault *entity.Vault,
 						groupIDs []string,
 					) {
-						newEntryButton.Disable()
 						syncButton.Disable()
+						if newEntryButton != nil {
+							newEntryButton.Disable()
+						}
 
 						runWithLoading(
 							window,

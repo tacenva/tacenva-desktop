@@ -28,12 +28,14 @@ type navItem struct {
 	onTap    func()
 	hover    bool
 	selected bool
+	disabled bool
 }
 
 func newNavItem(
 	menu menuItem,
 	text string,
 	icon fyne.Resource,
+	disabled bool,
 	onTap func(),
 ) *navItem {
 	item := &navItem{
@@ -43,7 +45,8 @@ func newNavItem(
 		bg: canvas.NewRectangle(
 			theme.Color(theme.ColorNameBackground),
 		),
-		onTap: onTap,
+		onTap:    onTap,
+		disabled: disabled,
 	}
 
 	item.ExtendBaseWidget(item)
@@ -68,12 +71,18 @@ func (item *navItem) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (item *navItem) Tapped(_ *fyne.PointEvent) {
-	if item.onTap != nil {
-		item.onTap()
+	if item.disabled || item.onTap == nil {
+		return
 	}
+
+	item.onTap()
 }
 
 func (item *navItem) MouseIn(_ *desktop.MouseEvent) {
+	if item.disabled {
+		return
+	}
+
 	item.hover = true
 	item.refreshBackground()
 }
@@ -83,12 +92,16 @@ func (item *navItem) MouseOut() {
 	item.refreshBackground()
 }
 
-func (item *navItem) MouseMoved(_ *desktop.MouseEvent) {
-}
-
 func (item *navItem) SetSelected(selected bool) {
+	if item.disabled {
+		return
+	}
+
 	item.selected = selected
 	item.refreshBackground()
+}
+
+func (item *navItem) MouseMoved(_ *desktop.MouseEvent) {
 }
 
 func (item *navItem) refreshBackground() {
@@ -144,6 +157,7 @@ func newSidebar(
 		menuVault,
 		"Vault",
 		theme.ListIcon(),
+		false,
 		func() {
 			selectItem(vault)
 		},
@@ -153,6 +167,7 @@ func newSidebar(
 		menuAccessControl,
 		"Access Control",
 		theme.AccountIcon(),
+		accessControlMenu == nil,
 		func() {
 			selectItem(accessControl)
 		},
@@ -162,6 +177,7 @@ func newSidebar(
 		menuSettings,
 		"Settings",
 		theme.SettingsIcon(),
+		false,
 		func() {
 			selectItem(settings)
 		},
