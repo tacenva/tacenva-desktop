@@ -41,8 +41,12 @@ func New(
 		sotService,
 	)
 
-	loadPermissionGroups := func() ([]entity.PermissionGroup, error) {
-		return vaultService.ListPermissionGroup()
+	isWriter := context.SelectedSot.Privilege == entity.PrivilegeWrite || context.SelectedSot.Privilege == entity.PrivilegeAdmin
+
+	loadPermissionGroups := func(
+		refresh bool,
+	) ([]entity.PermissionGroup, error) {
+		return vaultService.ListPermissionGroup(refresh)
 	}
 
 	var searchTimer *time.Timer
@@ -134,20 +138,19 @@ func New(
 		theme.ViewRefreshIcon(),
 		func() {
 			syncButton.Disable()
+			newEntryButton.Disable()
 
-			go func() {
-				err := vaultService.SyncVault()
-
-				fyne.Do(func() {
-					if err != nil {
-						syncButton.Enable()
-						dialog.ShowError(err, window)
-						return
-					}
-
+			runWithLoading(
+				window,
+				"Syncing Vaults...",
+				func() error {
+					return vaultService.SyncVault()
+				},
+				func() {
+					newEntryButton.Enable()
 					reload()
-				})
-			}()
+				},
+			)
 		},
 	)
 
@@ -157,7 +160,7 @@ func New(
 		onSave func(*entity.Vault, []string),
 	) {
 		go func() {
-			groups, err := loadPermissionGroups()
+			groups, err := loadPermissionGroups(false)
 
 			fyne.Do(func() {
 				if err != nil {
@@ -168,8 +171,9 @@ func New(
 				showForm(
 					window,
 					selectedVault,
-					context.SelectedSoT.GroupID,
+					context.SelectedSot.GroupID,
 					groups,
+					loadPermissionGroups,
 					onSave,
 				)
 			})
@@ -188,22 +192,28 @@ func New(
 				Italic: true,
 			}
 
-			updateButton := widget.NewButtonWithIcon(
-				"",
-				theme.DocumentCreateIcon(),
-				nil,
-			)
+			var updateButton *widget.Button
+			var deleteButton *widget.Button
 
-			deleteButton := widget.NewButtonWithIcon(
-				"",
-				theme.DeleteIcon(),
-				nil,
-			)
+			if isWriter {
+				updateButton = widget.NewButtonWithIcon(
+					"",
+					theme.DocumentCreateIcon(),
+					nil,
+				)
 
-			actions := container.NewHBox(
-				updateButton,
-				deleteButton,
-			)
+				deleteButton = widget.NewButtonWithIcon(
+					"",
+					theme.DeleteIcon(),
+					nil,
+				)
+			} else {
+				updateButton = widget.NewButton("", nil)
+				deleteButton = widget.NewButton("", nil)
+
+				updateButton.Hide()
+				deleteButton.Hide()
+			}
 
 			nameCell := container.NewBorder(
 				nil, nil, nil, nil, name,
@@ -213,15 +223,28 @@ func New(
 				nil, nil, nil, nil, updatedAt,
 			)
 
-			actionCell := container.NewBorder(
-				nil, nil, nil, actions, nil,
-			)
+			if isWriter {
+				actions := container.NewHBox(
+					updateButton,
+					deleteButton,
+				)
+
+				actionCell := container.NewBorder(
+					nil, nil, nil, actions, nil,
+				)
+
+				return container.NewGridWithColumns(
+					3,
+					nameCell,
+					dateCell,
+					actionCell,
+				)
+			}
 
 			return container.NewGridWithColumns(
-				3,
+				2,
 				nameCell,
 				dateCell,
-				actionCell,
 			)
 		},
 		func(
@@ -237,19 +260,24 @@ func New(
 
 			nameCell := row.Objects[0].(*fyne.Container)
 			dateCell := row.Objects[1].(*fyne.Container)
-			actionCell := row.Objects[2].(*fyne.Container)
 
 			name := nameCell.Objects[0].(*widget.Label)
 			updatedAt := dateCell.Objects[0].(*widget.Label)
-			actions := actionCell.Objects[0].(*fyne.Container)
-
-			updateButton := actions.Objects[0].(*widget.Button)
-			deleteButton := actions.Objects[1].(*widget.Button)
 
 			name.SetText(vault.Name)
 			updatedAt.SetText(
 				vault.UpdatedAt.Format("02 Jan 2006 15:04"),
 			)
+
+			if !isWriter {
+				return
+			}
+
+			actionCell := row.Objects[2].(*fyne.Container)
+			actions := actionCell.Objects[0].(*fyne.Container)
+
+			updateButton := actions.Objects[0].(*widget.Button)
+			deleteButton := actions.Objects[1].(*widget.Button)
 
 			updateButton.OnTapped = func() {
 				selectedVault := vault
@@ -260,21 +288,22 @@ func New(
 						updated *entity.Vault,
 						groupIDs []string,
 					) {
+						updated.GroupIDs = groupIDs
+
 						updateButton.Disable()
 						deleteButton.Disable()
+						newEntryButton.Disable()
 
-						go func() {
-							updated.GroupIDs = groupIDs
-							err := vaultService.UpdateVault(updated)
-
-							fyne.Do(func() {
+						runWithLoading(
+							window,
+							"Saving Vault changes...",
+							func() error {
+								return vaultService.UpdateVault(updated)
+							},
+							func() {
 								updateButton.Enable()
 								deleteButton.Enable()
-
-								if err != nil {
-									dialog.ShowError(err, window)
-									return
-								}
+								newEntryButton.Enable()
 
 								dialog.ShowInformation(
 									"Success",
@@ -283,8 +312,8 @@ func New(
 								)
 
 								reload()
-							})
-						}()
+							},
+						)
 					},
 				)
 			}
@@ -332,51 +361,60 @@ func New(
 		},
 	)
 
-	newEntryButton = widget.NewButtonWithIcon(
-		"New",
-		theme.ContentAddIcon(),
-		func() {
-			openVaultForm(
-				nil,
-				func(
-					newVault *entity.Vault,
-					groupIDs []string,
-				) {
-					newEntryButton.Disable()
+	if isWriter {
+		newEntryButton = widget.NewButtonWithIcon(
+			"New",
+			theme.ContentAddIcon(),
+			func() {
+				openVaultForm(
+					nil,
+					func(
+						newVault *entity.Vault,
+						groupIDs []string,
+					) {
+						newEntryButton.Disable()
+						syncButton.Disable()
 
-					go func() {
-						err := vaultService.CreateVault(
-							newVault.Name,
-							groupIDs,
+						runWithLoading(
+							window,
+							"Creating Vault...",
+							func() error {
+								return vaultService.CreateVault(
+									newVault.Name,
+									groupIDs,
+								)
+							},
+							func() {
+								syncButton.Enable()
+
+								dialog.ShowInformation(
+									"Success",
+									"Vault berhasil dibuat.",
+									window,
+								)
+
+								reload()
+							},
 						)
+					},
+				)
+			},
+		)
+	}
 
-						fyne.Do(func() {
-							newEntryButton.Enable()
+	toolbarButtons := []fyne.CanvasObject{
+		syncButton,
+	}
 
-							if err != nil {
-								dialog.ShowError(err, window)
-								return
-							}
-
-							dialog.ShowInformation(
-								"Success",
-								"Vault berhasil dibuat.",
-								window,
-							)
-
-							reload()
-						})
-					}()
-				},
-			)
-		},
-	)
+	if isWriter {
+		toolbarButtons = append(toolbarButtons, newEntryButton)
+	}
 
 	toolbar := container.NewBorder(
 		nil,
 		nil,
 		nil,
-		container.NewHBox(syncButton, newEntryButton),
+		container.NewHBox(toolbarButtons...),
 		search,
 	)
 
@@ -488,6 +526,7 @@ func showForm(
 	selectedVault *entity.Vault,
 	userGroupID string,
 	groups []entity.PermissionGroup,
+	loadGroups func(bool) ([]entity.PermissionGroup, error),
 	onSave func(vault *entity.Vault, groupIDs []string),
 ) {
 	isEdit := selectedVault != nil
@@ -590,13 +629,29 @@ func showForm(
 		updateGroupList(searchEntry.Text)
 	})
 
-	refreshButton := widget.NewButtonWithIcon(
+	var refreshButton *widget.Button
+
+	refreshButton = widget.NewButtonWithIcon(
 		"Refresh",
 		theme.ViewRefreshIcon(),
 		func() {
-			// Data group di-load dari service ketika form dibuka.
-			// Tombol ini menyegarkan tampilan berdasarkan data saat ini.
-			updateGroupList(searchEntry.Text)
+			refreshButton.Disable()
+
+			go func() {
+				updatedGroups, err := loadGroups(true)
+
+				fyne.Do(func() {
+					defer refreshButton.Enable()
+
+					if err != nil {
+						dialog.ShowError(err, window)
+						return
+					}
+
+					groups = updatedGroups
+					updateGroupList(searchEntry.Text)
+				})
+			}()
 		},
 	)
 
@@ -743,4 +798,35 @@ func maxFloat32(a, b float32) float32 {
 	}
 
 	return b
+}
+
+func runWithLoading(
+	window fyne.Window,
+	message string,
+	operation func() error,
+	onSuccess func(),
+) {
+	loadingDialog := dialog.NewProgressInfinite(
+		"Please wait",
+		message,
+		window,
+	)
+	loadingDialog.Show()
+
+	go func() {
+		err := operation()
+
+		fyne.Do(func() {
+			loadingDialog.Hide()
+
+			if err != nil {
+				dialog.ShowError(err, window)
+				return
+			}
+
+			if onSuccess != nil {
+				onSuccess()
+			}
+		})
+	}()
 }

@@ -26,7 +26,6 @@ func New(
 	coreService *coreApp.Services,
 	sotService *rCoreSot.Service,
 	discoveryState *discovery.State,
-	openNode sourceoftruth.OpenNodeFunc,
 ) *Screen {
 	title := widget.NewLabelWithStyle(
 		"Tacenva",
@@ -112,7 +111,6 @@ func New(
 			coreService,
 			sotService,
 			discoveryState,
-			openNode,
 		)
 
 		window.SetContent(sotScreen.Content)

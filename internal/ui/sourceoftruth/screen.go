@@ -1,6 +1,7 @@
 package sourceoftruth
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,13 +12,20 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/tacenva/database"
 	"github.com/tacenva/tacenva-desktop/internal/ui/discovery"
 	"github.com/tacenva/tacenva-desktop/internal/util"
+	"github.com/tacenva/tacenva-services/api"
 	rCoreApp "github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/entity"
 	coreApp "github.com/tacenva/tacpass-core/app"
+	"github.com/tacenva/tacpass-core/config"
+	coreEntity "github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/util/keyring"
+
+	uiapp "github.com/tacenva/tacenva-desktop/internal/ui/app"
+	replicaCore "github.com/tacenva/tacenva-services/app"
 )
 
 type OpenNodeFunc func(
@@ -46,7 +54,6 @@ func New(
 	coreServices *coreApp.Services,
 	sotService *sourceoftruth.Service,
 	discoveryState *discovery.State,
-	openNode OpenNodeFunc,
 ) *Screen {
 	sotList, err := sotService.List()
 	if err != nil {
@@ -89,6 +96,70 @@ func New(
 
 		sotList = updatedList
 		list.Refresh()
+	}
+
+	openNode := func(
+		selectedSot *entity.SourceOfTruth,
+		masterKey string,
+		onBack func(),
+	) (fyne.CanvasObject, error) {
+		nodeDBDir := appDeps.Config.Path(
+			config.NodeDirName,
+			selectedSot.ID,
+			"vault",
+		)
+
+		nodeContext := &replicaCore.Context{
+			SelectedSot: selectedSot,
+			NodeDB:      database.New(nodeDBDir),
+			IsRemote:    selectedSot.Address != "localhost",
+		}
+
+		appDeps.Client.SetToken(
+			nodeContext.SelectedSot.AuthToken,
+		)
+
+		appDeps.Client.ConfigureTLS(
+			nodeContext.SelectedSot.Address,
+			api.TLSConfig{
+				Fingerprint: nodeContext.SelectedSot.TLSFingerprint,
+
+				OnFirstTrust: func(
+					fingerprint string,
+				) error {
+					nodeContext.SelectedSot.TLSFingerprint = fingerprint
+
+					return sotService.Update(
+						nodeContext.SelectedSot,
+					)
+				},
+			},
+		)
+
+		if nodeContext.IsRemote {
+			if nodeContext.SelectedSot.UserStatus != coreEntity.UserStatusApproved {
+				err := sotService.CheckStatus(selectedSot)
+				if err != nil {
+					return nil, err
+				}
+
+				if selectedSot.UserStatus != coreEntity.UserStatusApproved {
+					return nil, errors.New("Status is not approved yet")
+				}
+			}
+		}
+
+		nodeScreen := uiapp.New(
+			window,
+			appDeps,
+			nodeContext,
+			masterKey,
+			coreServices,
+			sotService,
+			onBack,
+		)
+
+		return nodeScreen.Content, nil
 	}
 
 	list = widget.NewList(
@@ -388,6 +459,24 @@ func New(
 
 		selectedSot := sotList[id]
 
+		loading := widget.NewProgressBarInfinite()
+		status := widget.NewLabel("Opening Source of Truth...")
+
+		loadingContainer := container.NewVBox(
+			layout.NewSpacer(),
+			container.NewCenter(
+				container.NewVBox(
+					container.NewCenter(loading),
+					container.NewCenter(status),
+				),
+			),
+			layout.NewSpacer(),
+		)
+
+		previousContent := window.Content()
+		window.SetContent(loadingContainer)
+		list.Unselect(id)
+
 		// Temporary untuk testing trust ulang.
 		// if err := sotService.ResetTLSFingerprint(&selectedSot); err != nil {
 		// 	dialog.ShowError(err, window)
@@ -395,7 +484,7 @@ func New(
 		// 	return
 		// }
 
-		nodeContent := openNode(
+		nodeContent, err := openNode(
 			&selectedSot,
 			masterKey,
 			func() {
@@ -403,20 +492,28 @@ func New(
 					window.SetContent(content)
 
 					appDeps.Client.ClearToken()
-					appDeps.Client.ClearTLS(
-						selectedSot.Address,
-					)
-
-					list.Unselect(id)
+					appDeps.Client.ClearTLS(selectedSot.Address)
 
 					reload()
 				})
 			},
 		)
 
+		if err != nil {
+			loading.Stop()
+			window.SetContent(previousContent)
+
+			dialog.ShowError(err, window)
+			return
+		}
+
 		fyne.Do(func() {
+			if window.Content() != loadingContainer {
+				return
+			}
+
+			loading.Stop()
 			window.SetContent(nodeContent)
-			list.Unselect(id)
 		})
 	}
 

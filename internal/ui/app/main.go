@@ -9,10 +9,10 @@ import (
 	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
 	"github.com/tacenva/tacenva-desktop/internal/ui/setting"
 	"github.com/tacenva/tacenva-desktop/internal/ui/vault"
-	"github.com/tacenva/tacenva-services/api"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	coreApp "github.com/tacenva/tacpass-core/app"
+	"github.com/tacenva/tacpass-core/entity"
 )
 
 type Screen struct {
@@ -29,27 +29,6 @@ func New(
 	sotService *sourceoftruth.Service,
 	onBack func(),
 ) *Screen {
-	appDeps.Client.SetToken(
-		context.SelectedSoT.AuthToken,
-	)
-
-	appDeps.Client.ConfigureTLS(
-		context.SelectedSoT.Address,
-		api.TLSConfig{
-			Fingerprint: context.SelectedSoT.TLSFingerprint,
-
-			OnFirstTrust: func(
-				fingerprint string,
-			) error {
-				context.SelectedSoT.TLSFingerprint = fingerprint
-
-				return sotService.Update(
-					context.SelectedSoT,
-				)
-			},
-		},
-	)
-
 	vaultScreen := vault.New(
 		window,
 		appDeps,
@@ -59,12 +38,16 @@ func New(
 		sotService,
 	)
 
-	acScreen := accesscontrol.New(
-		window,
-		appDeps,
-		context,
-		coreService,
-	)
+	isAdmin := context.SelectedSot.Privilege == entity.PrivilegeAdmin
+	var acScreen *accesscontrol.Screen
+	if isAdmin {
+		acScreen = accesscontrol.New(
+			window,
+			appDeps,
+			context,
+			coreService,
+		)
+	}
 
 	settingScreen := setting.New(
 		window,
@@ -88,7 +71,7 @@ func New(
 	)
 
 	backButton := widget.NewButtonWithIcon(
-		context.SelectedSoT.Hostname,
+		context.SelectedSot.Hostname,
 		theme.NavigateBackIcon(),
 		onBack,
 	)
@@ -102,30 +85,41 @@ func New(
 	)
 
 	mainContent := container.NewMax()
+	showVault := func() {
+		mainContent.Objects = []fyne.CanvasObject{
+			vaultScreen.Content,
+		}
+		mainContent.Refresh()
+	}
 
-	sidebar := newSidebar(
-		func() {
-			mainContent.Objects = []fyne.CanvasObject{
-				vaultScreen.Content,
-			}
+	showSettings := func() {
+		mainContent.Objects = []fyne.CanvasObject{
+			settingScreen.Content,
+		}
+		mainContent.Refresh()
+	}
 
-			mainContent.Refresh()
-		},
-		func() {
+	var sidebar fyne.CanvasObject
+	if isAdmin {
+		showAccessControl := func() {
 			mainContent.Objects = []fyne.CanvasObject{
 				acScreen.Content,
 			}
-
 			mainContent.Refresh()
-		},
-		func() {
-			mainContent.Objects = []fyne.CanvasObject{
-				settingScreen.Content,
-			}
+		}
 
-			mainContent.Refresh()
-		},
-	)
+		sidebar = newSidebar(
+			showVault,
+			showAccessControl,
+			showSettings,
+		)
+	} else {
+		sidebar = newSidebar(
+			showVault,
+			nil,
+			showSettings,
+		)
+	}
 
 	body := container.NewBorder(
 		nil,

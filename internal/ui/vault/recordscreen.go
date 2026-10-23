@@ -46,6 +46,9 @@ func NewRecordScreen(
 		sotService,
 	)
 
+	isWriter := context.SelectedSot.Privilege == entity.PrivilegeWrite ||
+		context.SelectedSot.Privilege == entity.PrivilegeAdmin
+
 	var searchTimer *time.Timer
 
 	search := widget.NewEntry()
@@ -276,22 +279,22 @@ func NewRecordScreen(
 				expiredAt,
 			)
 
-			updateButton := widget.NewButtonWithIcon(
-				"",
-				theme.DocumentCreateIcon(),
-				nil,
-			)
+			var updateButton *widget.Button
+			var deleteButton *widget.Button
 
-			deleteButton := widget.NewButtonWithIcon(
-				"",
-				theme.DeleteIcon(),
-				nil,
-			)
+			if isWriter {
+				updateButton = widget.NewButtonWithIcon(
+					"",
+					theme.DocumentCreateIcon(),
+					nil,
+				)
 
-			actions := container.NewHBox(
-				updateButton,
-				deleteButton,
-			)
+				deleteButton = widget.NewButtonWithIcon(
+					"",
+					theme.DeleteIcon(),
+					nil,
+				)
+			}
 
 			info := container.NewGridWithColumns(
 				4,
@@ -299,6 +302,15 @@ func NewRecordScreen(
 				endpointCell,
 				passwordCell,
 				expiredAtCell,
+			)
+
+			if !isWriter {
+				return info
+			}
+
+			actions := container.NewHBox(
+				updateButton,
+				deleteButton,
 			)
 
 			actionCell := container.NewBorder(
@@ -330,8 +342,15 @@ func NewRecordScreen(
 
 			row := obj.(*fyne.Container)
 
-			info := row.Objects[0].(*fyne.Container)
-			actionCell := row.Objects[1].(*fyne.Container)
+			var info *fyne.Container
+			var actionCell *fyne.Container
+
+			if isWriter {
+				info = row.Objects[0].(*fyne.Container)
+				actionCell = row.Objects[1].(*fyne.Container)
+			} else {
+				info = row
+			}
 
 			nameCell := info.Objects[0].(*fyne.Container)
 			endpointCell := info.Objects[1].(*fyne.Container)
@@ -383,94 +402,96 @@ func NewRecordScreen(
 				)
 			}
 
-			updateButton.OnTapped = func() {
-				selectedRecord := record
+			if isWriter {
+				updateButton.OnTapped = func() {
+					selectedRecord := record
 
-				showRecordForm(
-					window,
-					&selectedRecord,
-					func(updated *entity.VaultRecord) {
-						updateButton.Disable()
-						deleteButton.Disable()
+					showRecordForm(
+						window,
+						&selectedRecord,
+						func(updated *entity.VaultRecord) {
+							updateButton.Disable()
+							deleteButton.Disable()
 
-						go func() {
-							_, err := vaultService.UpdateRecord(
-								selectedVault,
-								updated,
-								wrappedKey,
-							)
+							go func() {
+								_, err := vaultService.UpdateRecord(
+									selectedVault,
+									updated,
+									wrappedKey,
+								)
 
-							fyne.Do(func() {
-								updateButton.Enable()
-								deleteButton.Enable()
+								fyne.Do(func() {
+									updateButton.Enable()
+									deleteButton.Enable()
 
-								if err != nil {
-									dialog.ShowError(
-										err,
+									if err != nil {
+										dialog.ShowError(
+											err,
+											window,
+										)
+
+										return
+									}
+
+									dialog.ShowInformation(
+										"Success",
+										"Record berhasil diperbarui.",
 										window,
 									)
 
-									return
-								}
+									reload()
+								})
+							}()
+						},
+					)
+				}
 
-								dialog.ShowInformation(
-									"Success",
-									"Record berhasil diperbarui.",
-									window,
+				deleteButton.OnTapped = func() {
+					dialog.ShowConfirm(
+						"Delete Record",
+						"Record \""+
+							record.Name+
+							"\" will be deleted. Continue?",
+						func(ok bool) {
+							if !ok {
+								return
+							}
+
+							updateButton.Disable()
+							deleteButton.Disable()
+
+							go func() {
+								err := vaultService.DeleteRecord(
+									selectedVault,
+									&record,
 								)
 
-								reload()
-							})
-						}()
-					},
-				)
-			}
+								fyne.Do(func() {
+									updateButton.Enable()
+									deleteButton.Enable()
 
-			deleteButton.OnTapped = func() {
-				dialog.ShowConfirm(
-					"Delete Record",
-					"Record \""+
-						record.Name+
-						"\" will be deleted. Continue?",
-					func(ok bool) {
-						if !ok {
-							return
-						}
+									if err != nil {
+										dialog.ShowError(
+											err,
+											window,
+										)
 
-						updateButton.Disable()
-						deleteButton.Disable()
+										return
+									}
 
-						go func() {
-							err := vaultService.DeleteRecord(
-								selectedVault,
-								&record,
-							)
-
-							fyne.Do(func() {
-								updateButton.Enable()
-								deleteButton.Enable()
-
-								if err != nil {
-									dialog.ShowError(
-										err,
+									dialog.ShowInformation(
+										"Success",
+										"Record berhasil dihapus.",
 										window,
 									)
 
-									return
-								}
-
-								dialog.ShowInformation(
-									"Success",
-									"Record berhasil dihapus.",
-									window,
-								)
-
-								reload()
-							})
-						}()
-					},
-					window,
-				)
+									reload()
+								})
+							}()
+						},
+						window,
+					)
+				}
 			}
 		},
 	)
