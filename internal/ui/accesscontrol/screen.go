@@ -361,12 +361,6 @@ func New(
 								return
 							}
 
-							dialog.ShowInformation(
-								"Success",
-								"Access control created successfully.",
-								window,
-							)
-
 							reload()
 
 							if keyPair != nil {

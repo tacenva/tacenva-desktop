@@ -1,6 +1,8 @@
 package vault
 
 import (
+	"encoding/json"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -440,6 +442,13 @@ func New(
 		}
 
 		selectedVault := filteredVaults[id]
+		vaultJSON, err := json.MarshalIndent(selectedVault, "", "  ")
+		if err != nil {
+			log.Printf("[DEBUG] Marshal selectedVault error: %v", err)
+		} else {
+			log.Printf("[DEBUG] selectedVault JSON:\n%s", string(vaultJSON))
+		}
+
 		wrappedKey := selectedVault.WrappedKey
 		if !context.IsRemote {
 			var err error
@@ -553,7 +562,20 @@ func showForm(
 
 	selectedGroups := make(map[string]bool)
 
-	if len(groups) > 0 {
+	if isEdit {
+		for _, groupID := range vault.GroupIDs {
+			selectedGroups[groupID] = true
+		}
+
+		debugJSON, err := json.MarshalIndent(vault.GroupIDs, "", "  ")
+		if err != nil {
+			log.Printf("[DEBUG] failed to marshal vault.GroupIDs: %v", err)
+		} else {
+			log.Printf("[DEBUG] vault.GroupIDs:\n%s", debugJSON)
+		}
+	}
+
+	if userGroupID != "" {
 		selectedGroups[userGroupID] = true
 	}
 
