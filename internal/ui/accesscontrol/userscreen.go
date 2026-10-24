@@ -133,21 +133,14 @@ func NewUser(
 			hostname := widget.NewLabel("")
 			status := widget.NewLabel("")
 
-			approveButton := widget.NewButtonWithIcon(
-				"",
-				theme.ConfirmIcon(),
-				nil,
-			)
+			statusButton := widget.NewButton("", nil)
 
-			revokeButton := widget.NewButtonWithIcon(
-				"",
-				theme.DeleteIcon(),
+			actionCell := container.NewBorder(
 				nil,
-			)
-
-			actions := container.NewHBox(
-				approveButton,
-				revokeButton,
+				nil,
+				nil,
+				statusButton,
+				nil,
 			)
 
 			hostnameCell := container.NewBorder(
@@ -166,14 +159,6 @@ func NewUser(
 				status,
 			)
 
-			actionCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				actions,
-				nil,
-			)
-
 			return container.NewGridWithColumns(
 				3,
 				hostnameCell,
@@ -181,6 +166,7 @@ func NewUser(
 				actionCell,
 			)
 		},
+
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
 			if id < 0 || id >= len(filteredUsers) {
 				return
@@ -188,138 +174,114 @@ func NewUser(
 
 			userData := filteredUsers[id]
 
-			row := obj.(*fyne.Container)
-
-			hostnameCell := row.Objects[0].(*fyne.Container)
-			statusCell := row.Objects[1].(*fyne.Container)
-			actionCell := row.Objects[2].(*fyne.Container)
-
-			hostname := hostnameCell.Objects[0].(*widget.Label)
-			status := statusCell.Objects[0].(*widget.Label)
-			actions := actionCell.Objects[0].(*fyne.Container)
-
-			approveButton := actions.Objects[0].(*widget.Button)
-			revokeButton := actions.Objects[1].(*widget.Button)
-
-			hostname.SetText(
-				userData.Hostname,
-			)
-
-			status.SetText(
-				string(userData.Status),
-			)
-
-			approveButton.OnTapped = func() {
-				dialog.ShowConfirm(
-					"Approve User",
-					"User \""+
-						userData.Hostname+
-						"\" will be approved. Continue?",
-					func(ok bool) {
-						if !ok {
-							return
-						}
-
-						approveButton.Disable()
-						revokeButton.Disable()
-
-						go func() {
-							_, err := acService.ApproveUser(
-								userData.ID,
-							)
-
-							fyne.Do(func() {
-								approveButton.Enable()
-								revokeButton.Enable()
-
-								if err != nil {
-									dialog.ShowError(
-										err,
-										window,
-									)
-
-									return
-								}
-
-								dialog.ShowInformation(
-									"Success",
-									"User berhasil di-approve.",
-									window,
-								)
-
-								reload()
-							})
-						}()
-					},
-					window,
-				)
+			row, ok := obj.(*fyne.Container)
+			if !ok || len(row.Objects) < 3 {
+				return
 			}
 
-			revokeButton.OnTapped = func() {
-				dialog.ShowConfirm(
-					"Revoke User",
-					"User \""+
-						userData.Hostname+
-						"\" will be revoked. Continue?",
-					func(ok bool) {
-						if !ok {
-							return
-						}
-
-						approveButton.Disable()
-						revokeButton.Disable()
-
-						go func() {
-							_, err := acService.RevokeUser(
-								userData.ID,
-							)
-
-							fyne.Do(func() {
-								approveButton.Enable()
-								revokeButton.Enable()
-
-								if err != nil {
-									dialog.ShowError(
-										err,
-										window,
-									)
-
-									return
-								}
-
-								dialog.ShowInformation(
-									"Success",
-									"User berhasil di-revoke.",
-									window,
-								)
-
-								reload()
-							})
-						}()
-					},
-					window,
-				)
+			hostnameCell, ok := row.Objects[0].(*fyne.Container)
+			if !ok || len(hostnameCell.Objects) == 0 {
+				return
 			}
+
+			statusCell, ok := row.Objects[1].(*fyne.Container)
+			if !ok || len(statusCell.Objects) == 0 {
+				return
+			}
+
+			actionCell, ok := row.Objects[2].(*fyne.Container)
+			if !ok || len(actionCell.Objects) == 0 {
+				return
+			}
+
+			hostname, ok := hostnameCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			status, ok := statusCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			statusButton, ok := actionCell.Objects[0].(*widget.Button)
+			if !ok {
+				return
+			}
+
+			hostname.SetText(userData.Hostname)
+			status.SetText(string(userData.Status))
+
+			var (
+				actionName   string
+				confirmTitle string
+				successMsg   string
+				targetStatus entity.UserStatus
+			)
 
 			switch userData.Status {
-			case entity.UserStatusPending:
-				approveButton.Show()
-				revokeButton.Show()
+			case entity.UserStatusPending, entity.UserStatusRevoked:
+				actionName = "Approve"
+				confirmTitle = "Approve User"
+				successMsg = "User approved successfully."
+				targetStatus = entity.UserStatusApproved
 
 			case entity.UserStatusApproved:
-				approveButton.Hide()
-				revokeButton.Show()
-
-			case entity.UserStatusRevoked:
-				approveButton.Show()
-				revokeButton.Hide()
+				actionName = "Revoke"
+				confirmTitle = "Revoke User"
+				successMsg = "User revoked successfully."
+				targetStatus = entity.UserStatusRevoked
 
 			default:
-				approveButton.Hide()
-				revokeButton.Hide()
+				statusButton.Hide()
+				return
 			}
 
-			actions.Refresh()
+			statusButton.SetText(actionName)
+			statusButton.Show()
+
+			statusButton.OnTapped = func() {
+				currentUser := userData
+
+				dialog.ShowConfirm(
+					confirmTitle,
+					"User \""+currentUser.Hostname+
+						"\" will be "+strings.ToLower(actionName)+
+						". Continue?",
+					func(ok bool) {
+						if !ok {
+							return
+						}
+
+						statusButton.Disable()
+
+						go func() {
+							err := acService.SetUserStatus(
+								currentUser.ID,
+								targetStatus,
+							)
+
+							fyne.Do(func() {
+								statusButton.Enable()
+
+								if err != nil {
+									dialog.ShowError(err, window)
+									return
+								}
+
+								dialog.ShowInformation(
+									"Success",
+									successMsg,
+									window,
+								)
+
+								reload()
+							})
+						}()
+					},
+					window,
+				)
+			}
 		},
 	)
 

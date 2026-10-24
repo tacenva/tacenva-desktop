@@ -544,6 +544,7 @@ func showForm(
 	secretKeyEntry := widget.NewMultiLineEntry()
 	secretKeyEntry.SetPlaceHolder("Paste secret key")
 	secretKeyEntry.SetMinRowsVisible(4)
+	secretKeyEntry.Wrapping = fyne.TextWrapBreak
 
 	// Saat edit, tampilkan key yang tersimpan dalam format encoded.
 	if sot.KeyPair.PublicKey != "" || sot.KeyPair.PrivateKey != "" {

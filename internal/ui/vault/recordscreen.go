@@ -2,6 +2,7 @@ package vault
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -13,7 +14,7 @@ import (
 	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
-	"github.com/tacenva/tacenva-services/app/vault"
+	vaultServicePackage "github.com/tacenva/tacenva-services/app/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
 	"github.com/tacenva/tacpass-core/entity"
 	"github.com/tacenva/tacpass-core/util/credential"
@@ -36,7 +37,7 @@ func NewRecordScreen(
 	wrappedKey string,
 	onBack func(),
 ) *RecordScreen {
-	vaultService := vault.NewService(
+	vaultService := vaultServicePackage.NewService(
 		appDeps,
 		context,
 		masterKey,
@@ -49,6 +50,13 @@ func NewRecordScreen(
 	isWriter := context.SelectedSot.Privilege == entity.PrivilegeWrite ||
 		context.SelectedSot.Privilege == entity.PrivilegeAdmin
 
+	isOnline := func() bool {
+		if !context.IsRemote {
+			return true
+		}
+		return appDeps.Client.IsReachable()
+	}
+
 	var searchTimer *time.Timer
 
 	search := widget.NewEntry()
@@ -60,9 +68,39 @@ func NewRecordScreen(
 	var entryList *widget.List
 	var syncButton *widget.Button
 	var newEntryButton *widget.Button
+	var recordContent fyne.CanvasObject
+
+	var stateMu sync.Mutex
+	busy := false
+	listLoading := true
+	needSyncState := false
 
 	content := container.NewMax()
 	loadingView := loading.New("Loading passwords...")
+
+	isBusy := func() bool {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+		return busy
+	}
+
+	isListLoading := func() bool {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+		return listLoading
+	}
+
+	setBusy := func(value bool) {
+		stateMu.Lock()
+		busy = value
+		stateMu.Unlock()
+	}
+
+	setListLoading := func(value bool) {
+		stateMu.Lock()
+		listLoading = value
+		stateMu.Unlock()
+	}
 
 	filterVaultRecords := func(
 		records []entity.VaultRecord,
@@ -89,59 +127,127 @@ func NewRecordScreen(
 		return filtered
 	}
 
-	applyRecords := func(
-		records []entity.VaultRecord,
-		needSync bool,
-	) {
-		allVaultRecords = records
-		filteredVaultRecords = filterVaultRecords(
-			allVaultRecords,
-			search.Text,
-		)
+	updateActionStates := func() {
+		online := isOnline()
+		working := isBusy() || isListLoading()
 
 		if syncButton != nil {
-			if needSync {
+			if online && !working && needSyncState {
 				syncButton.Enable()
 			} else {
 				syncButton.Disable()
 			}
 		}
 
-		entryList.UnselectAll()
-		entryList.Refresh()
-	}
-
-	reload := func() {
-		if syncButton != nil {
-			syncButton.Disable()
+		if newEntryButton != nil {
+			if online && !working && isWriter {
+				newEntryButton.Enable()
+			} else {
+				newEntryButton.Disable()
+			}
 		}
 
+		if entryList != nil {
+			entryList.Refresh()
+		}
+	}
+
+	applyRecords := func(
+		records []entity.VaultRecord,
+		needSync bool,
+	) {
+		allVaultRecords = append([]entity.VaultRecord(nil), records...)
+		filteredVaultRecords = filterVaultRecords(
+			allVaultRecords,
+			search.Text,
+		)
+		needSyncState = needSync
+
+		entryList.UnselectAll()
+		updateActionStates()
+	}
+
+	var reload func()
+
+	reload = func() {
+		stateMu.Lock()
+		if busy || listLoading {
+			stateMu.Unlock()
+			return
+		}
+		listLoading = true
+		stateMu.Unlock()
+
+		updateActionStates()
+
 		go func() {
-			updatedVaultRecords, needSync, err :=
-				vaultService.ListRecord(
-					selectedVault,
-					wrappedKey,
-				)
+			records, needSync, err := vaultService.ListRecord(
+				selectedVault,
+				wrappedKey,
+			)
 
 			fyne.Do(func() {
-				if err != nil {
-					if updatedVaultRecords == nil {
-						if syncButton != nil {
-							syncButton.Enable()
-						}
+				setListLoading(false)
 
+				if err != nil {
+					if records == nil {
+						if len(allVaultRecords) == 0 {
+							loadingView.ShowError(
+								"Failed to load passwords.",
+							)
+						}
+						updateActionStates()
 						dialog.ShowError(err, window)
 						return
 					}
 
-					applyRecords(updatedVaultRecords, needSync)
+					applyRecords(records, needSync)
+					loadingView.Show(recordContent)
 					dialog.ShowError(err, window)
 					return
 				}
 
-				applyRecords(updatedVaultRecords, needSync)
+				applyRecords(records, needSync)
+				loadingView.Show(recordContent)
 			})
 		}()
+	}
+
+	runOperation := func(
+		message string,
+		operation func() error,
+		onSuccess func(),
+	) {
+		if !isOnline() {
+			dialog.ShowInformation(
+				"Offline",
+				"Koneksi tidak tersedia.",
+				window,
+			)
+			return
+		}
+
+		stateMu.Lock()
+		if busy || listLoading {
+			stateMu.Unlock()
+			return
+		}
+		busy = true
+		stateMu.Unlock()
+
+		updateActionStates()
+
+		runWithLoading(
+			window,
+			message,
+			operation,
+			onSuccess,
+			func() {
+				setBusy(false)
+				updateActionStates()
+			},
+			nil,
+		)
 	}
 
 	backButton := widget.NewButtonWithIcon(
@@ -150,71 +256,64 @@ func NewRecordScreen(
 		onBack,
 	)
 
-	// Sync tersedia untuk semua privilege.
 	syncButton = widget.NewButtonWithIcon(
 		"Sync",
 		theme.ViewRefreshIcon(),
 		func() {
-			syncButton.Disable()
+			if !isOnline() || isBusy() || isListLoading() {
+				return
+			}
 
-			go func() {
-				err := vaultService.SyncRecord(selectedVault)
-
-				fyne.Do(func() {
-					if err != nil {
-						syncButton.Enable()
-						dialog.ShowError(err, window)
-						return
-					}
-
-					reload()
-
+			runOperation(
+				"Syncing Records...",
+				func() error {
+					return vaultService.SyncRecord(selectedVault)
+				},
+				func() {
 					dialog.ShowInformation(
 						"Success",
 						"Records berhasil disinkronkan.",
 						window,
 					)
-				})
-			}()
+					reload()
+				},
+			)
 		},
 	)
 
-	// New hanya tersedia untuk Writer/Admin.
 	if isWriter {
 		newEntryButton = widget.NewButtonWithIcon(
 			"New",
 			theme.ContentAddIcon(),
 			func() {
+				if !isOnline() || isBusy() || isListLoading() {
+					return
+				}
+
 				showRecordForm(
 					window,
 					nil,
+					isOnline,
 					func(newRecord *entity.VaultRecord) {
-						newEntryButton.Disable()
-
-						go func() {
-							_, err := vaultService.AppendRecord(
-								selectedVault,
-								newRecord,
-								wrappedKey,
-							)
-
-							fyne.Do(func() {
-								newEntryButton.Enable()
-
-								if err != nil {
-									dialog.ShowError(err, window)
-									return
-								}
-
+						runOperation(
+							"Creating Record...",
+							func() error {
+								_, err := vaultService.AppendRecord(
+									selectedVault,
+									newRecord,
+									wrappedKey,
+								)
+								return err
+							},
+							func() {
 								dialog.ShowInformation(
 									"Success",
 									"Record berhasil dibuat.",
 									window,
 								)
-
 								reload()
-							})
-						}()
+							},
+						)
 					},
 				)
 			},
@@ -316,12 +415,13 @@ func NewRecordScreen(
 					return
 				}
 
-				var okInfo, okAction bool
+				info, ok = row.Objects[0].(*fyne.Container)
+				if !ok {
+					return
+				}
 
-				info, okInfo = row.Objects[0].(*fyne.Container)
-				actionCell, okAction = row.Objects[1].(*fyne.Container)
-
-				if !okInfo || !okAction {
+				actionCell, ok = row.Objects[1].(*fyne.Container)
+				if !ok {
 					return
 				}
 			} else {
@@ -418,89 +518,105 @@ func NewRecordScreen(
 			if record.ExpiredAt.IsZero() {
 				expiredAt.SetText("-")
 			} else {
-				expiredAt.SetText(record.ExpiredAt.Format("02 Jan 2006"))
+				expiredAt.SetText(
+					record.ExpiredAt.Format("02 Jan 2006"),
+				)
 			}
 
-			if isWriter {
-				updateButton.OnTapped = func() {
-					selectedRecord := record
+			if !isWriter {
+				return
+			}
 
-					showRecordForm(
-						window,
-						&selectedRecord,
-						func(updated *entity.VaultRecord) {
-							updateButton.Disable()
-							deleteButton.Disable()
+			actionsEnabled := isOnline() &&
+				!isBusy() &&
+				!isListLoading()
 
-							go func() {
+			if actionsEnabled {
+				updateButton.Enable()
+				deleteButton.Enable()
+			} else {
+				updateButton.Disable()
+				deleteButton.Disable()
+			}
+
+			updateButton.OnTapped = func() {
+				if !isOnline() || isBusy() || isListLoading() {
+					return
+				}
+
+				selectedRecord := record
+
+				showRecordForm(
+					window,
+					&selectedRecord,
+					isOnline,
+					func(updated *entity.VaultRecord) {
+						runOperation(
+							"Saving Record...",
+							func() error {
 								_, err := vaultService.UpdateRecord(
 									selectedVault,
 									updated,
 									wrappedKey,
 								)
+								return err
+							},
+							func() {
+								dialog.ShowInformation(
+									"Success",
+									"Record berhasil diperbarui.",
+									window,
+								)
+								reload()
+							},
+						)
+					},
+				)
+			}
 
-								fyne.Do(func() {
-									updateButton.Enable()
-									deleteButton.Enable()
-
-									if err != nil {
-										dialog.ShowError(err, window)
-										return
-									}
-
-									dialog.ShowInformation(
-										"Success",
-										"Record berhasil diperbarui.",
-										window,
-									)
-
-									reload()
-								})
-							}()
-						},
-					)
+			deleteButton.OnTapped = func() {
+				if !isOnline() || isBusy() || isListLoading() {
+					return
 				}
 
-				deleteButton.OnTapped = func() {
-					dialog.ShowConfirm(
-						"Delete Record",
-						"Record \""+record.Name+"\" will be deleted. Continue?",
-						func(ok bool) {
-							if !ok {
-								return
-							}
+				dialog.ShowConfirm(
+					"Delete Record",
+					"Record \""+record.Name+
+						"\" will be deleted. Continue?",
+					func(ok bool) {
+						if !ok {
+							return
+						}
 
-							updateButton.Disable()
-							deleteButton.Disable()
+						if !isOnline() || isBusy() || isListLoading() {
+							dialog.ShowInformation(
+								"Offline",
+								"Koneksi tidak tersedia. Penghapusan dibatalkan.",
+								window,
+							)
+							return
+						}
 
-							go func() {
-								err := vaultService.DeleteRecord(
+						runOperation(
+							"Deleting Record...",
+							func() error {
+								return vaultService.DeleteRecord(
 									selectedVault,
 									&record,
 								)
-
-								fyne.Do(func() {
-									updateButton.Enable()
-									deleteButton.Enable()
-
-									if err != nil {
-										dialog.ShowError(err, window)
-										return
-									}
-
-									dialog.ShowInformation(
-										"Success",
-										"Record berhasil dihapus.",
-										window,
-									)
-
-									reload()
-								})
-							}()
-						},
-						window,
-					)
-				}
+							},
+							func() {
+								dialog.ShowInformation(
+									"Success",
+									"Record berhasil dihapus.",
+									window,
+								)
+								reload()
+							},
+						)
+					},
+					window,
+				)
 			}
 		},
 	)
@@ -519,7 +635,7 @@ func NewRecordScreen(
 		search,
 	)
 
-	recordContent := container.NewBorder(
+	recordContent = container.NewBorder(
 		toolbar,
 		nil,
 		nil,
@@ -554,33 +670,58 @@ func NewRecordScreen(
 	}
 
 	go func() {
-		updatedVaultRecords, needSync, err :=
-			vaultService.ListRecord(
-				selectedVault,
-				wrappedKey,
-			)
+		records, needSync, err := vaultService.ListRecord(
+			selectedVault,
+			wrappedKey,
+		)
 
 		fyne.Do(func() {
+			setListLoading(false)
+
 			if err != nil {
-				if updatedVaultRecords == nil {
+				if records == nil {
 					loadingView.ShowError(
 						"Failed to load passwords.",
 					)
-
+					updateActionStates()
 					dialog.ShowError(err, window)
 					return
 				}
 
-				applyRecords(updatedVaultRecords, needSync)
+				applyRecords(records, needSync)
 				loadingView.Show(recordContent)
 				dialog.ShowError(err, window)
 				return
 			}
 
-			applyRecords(updatedVaultRecords, needSync)
+			applyRecords(records, needSync)
 			loadingView.Show(recordContent)
 		})
 	}()
+
+	if context.IsRemote {
+		go func() {
+			wasOnline := isOnline()
+
+			for {
+				time.Sleep(5 * time.Second)
+
+				online := isOnline()
+
+				fyne.Do(func() {
+					updateActionStates()
+				})
+
+				if online && !wasOnline {
+					fyne.Do(func() {
+						reload()
+					})
+				}
+
+				wasOnline = online
+			}
+		}()
+	}
 
 	return &RecordScreen{
 		Content: content,
@@ -590,6 +731,7 @@ func NewRecordScreen(
 func showRecordForm(
 	window fyne.Window,
 	selectedRecord *entity.VaultRecord,
+	isOnline func() bool,
 	onSave func(record *entity.VaultRecord),
 ) {
 	isEdit := selectedRecord != nil
@@ -661,6 +803,15 @@ func showRecordForm(
 				return
 			}
 
+			if isOnline == nil || !isOnline() {
+				dialog.ShowInformation(
+					"Offline",
+					"Koneksi terputus. Perubahan tidak disimpan.",
+					window,
+				)
+				return
+			}
+
 			name := strings.TrimSpace(nameEntry.Text)
 			endpoint := strings.TrimSpace(endpointEntry.Text)
 			password := passwordEntry.Text
@@ -684,7 +835,9 @@ func showRecordForm(
 				record.ExpiredAt = *expiredAtEntry.Date
 			}
 
-			onSave(&record)
+			if onSave != nil {
+				onSave(&record)
+			}
 		},
 		window,
 	)
