@@ -12,12 +12,13 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	vaultServicePackage "github.com/tacenva/tacenva-services/app/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/entity"
+	tacpassentity "github.com/tacenva/tacpass-core/entity"
 )
 
 type Screen struct {
@@ -32,18 +33,26 @@ func New(
 	coreService *coreApp.Services,
 	sotService *sourceoftruth.Service,
 ) *Screen {
+	vaultDir := appDeps.Config.VaultDir()
+	if context.IsRemote {
+		err := coreService.Vault.Replica.SetConfig(vaultDir, masterKey)
+		if err != nil {
+			return nil
+		}
+	} else {
+		coreService.Vault.Sot.SetConfig(vaultDir)
+	}
 	vaultService := vaultServicePackage.NewService(
 		appDeps,
 		context,
-		masterKey,
 		coreService.Vault,
 		coreService.VaultRecord,
 		coreService.Auth,
 		sotService,
 	)
 
-	isWriter := context.SelectedSot.Privilege == entity.PrivilegeWrite ||
-		context.SelectedSot.Privilege == entity.PrivilegeAdmin
+	isWriter := context.SelectedSot.Auth.Level == tacenvaentity.LevelWrite ||
+		context.SelectedSot.Auth.Level == tacenvaentity.LevelAdmin
 
 	isOnline := func() bool {
 		if !context.IsRemote {
@@ -52,8 +61,8 @@ func New(
 		return appDeps.Client.IsReachable()
 	}
 
-	loadPermissionGroups := func(refresh bool) ([]entity.PermissionGroup, error) {
-		return vaultService.ListPermissionGroup(refresh)
+	loadAccessGroups := func(refresh bool) ([]tacenvaentity.AccessGroup, error) {
+		return vaultService.AllAccessGroup(refresh)
 	}
 
 	var searchTimer *time.Timer
@@ -61,8 +70,8 @@ func New(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search collection...")
 
-	allVault := make([]entity.Vault, 0)
-	filteredVaults := make([]entity.Vault, 0)
+	allVault := make([]tacpassentity.Vault, 0)
+	filteredVaults := make([]tacpassentity.Vault, 0)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
@@ -82,14 +91,14 @@ func New(
 		return busy, listLoading
 	}
 
-	filterVault := func(vaults []entity.Vault, query string) []entity.Vault {
+	filterVault := func(vaults []tacpassentity.Vault, query string) []tacpassentity.Vault {
 		query = strings.ToLower(strings.TrimSpace(query))
 
 		if query == "" {
-			return append([]entity.Vault(nil), vaults...)
+			return append([]tacpassentity.Vault(nil), vaults...)
 		}
 
-		filtered := make([]entity.Vault, 0, len(vaults))
+		filtered := make([]tacpassentity.Vault, 0, len(vaults))
 
 		for _, item := range vaults {
 			if strings.Contains(strings.ToLower(item.Name), query) {
@@ -128,8 +137,8 @@ func New(
 	content := container.NewMax()
 	loadingView := loading.New("Loading collections...")
 
-	applyVault := func(vaults []entity.Vault, needSync bool) {
-		allVault = append([]entity.Vault(nil), vaults...)
+	applyVault := func(vaults []tacpassentity.Vault, needSync bool) {
+		allVault = append([]tacpassentity.Vault(nil), vaults...)
 		filteredVaults = filterVault(allVault, search.Text)
 		needSyncState = needSync
 
@@ -243,8 +252,8 @@ func New(
 	}
 
 	openVaultForm := func(
-		selectedVault *entity.Vault,
-		onSave func(*entity.Vault, []string),
+		selectedVault *tacpassentity.Vault,
+		onSave func(*tacpassentity.Vault, []string),
 	) {
 		currentBusy, currentLoading := getOperationState()
 		if !isOnline() || currentBusy || currentLoading {
@@ -252,7 +261,7 @@ func New(
 		}
 
 		go func() {
-			groups, err := loadPermissionGroups(false)
+			groups, err := loadAccessGroups(false)
 
 			fyne.Do(func() {
 				if !isOnline() {
@@ -267,9 +276,9 @@ func New(
 				showForm(
 					window,
 					selectedVault,
-					context.SelectedSot.GroupID,
+					context.SelectedSot.AccessGroup.ID,
 					groups,
-					loadPermissionGroups,
+					loadAccessGroups,
 					isOnline,
 					onSave,
 				)
@@ -357,7 +366,7 @@ func New(
 
 				selectedVault := selected
 
-				openVaultForm(&selectedVault, func(updated *entity.Vault, groupIDs []string) {
+				openVaultForm(&selectedVault, func(updated *tacpassentity.Vault, groupIDs []string) {
 					if !isOnline() {
 						dialog.ShowInformation("Offline", "Koneksi terputus. Perubahan tidak disimpan.", window)
 						return
@@ -425,7 +434,7 @@ func New(
 					return
 				}
 
-				openVaultForm(nil, func(newVault *entity.Vault, groupIDs []string) {
+				openVaultForm(nil, func(newVault *tacpassentity.Vault, groupIDs []string) {
 					if !isOnline() {
 						dialog.ShowInformation("Offline", "Koneksi terputus. Vault tidak dibuat.", window)
 						return
@@ -478,7 +487,7 @@ func New(
 
 		if !context.IsRemote {
 			var err error
-			wrappedKey, err = vaultService.GetWrappedKey(selectedVault.ID)
+			wrappedKey, err = vaultService.GetWrappedVaultKey(selectedVault.ID)
 			if err != nil {
 				dialog.ShowError(err, window)
 				return
@@ -498,6 +507,9 @@ func New(
 				content.Objects = []fyne.CanvasObject{vaultContent}
 				content.Refresh()
 			},
+
+			vaultService,
+			isWriter,
 		)
 
 		content.Objects = []fyne.CanvasObject{recordScreen.Content}
@@ -572,16 +584,16 @@ func New(
 
 func showForm(
 	window fyne.Window,
-	selectedVault *entity.Vault,
+	selectedVault *tacpassentity.Vault,
 	userGroupID string,
-	groups []entity.PermissionGroup,
-	loadGroups func(bool) ([]entity.PermissionGroup, error),
+	groups []tacenvaentity.AccessGroup,
+	loadGroups func(bool) ([]tacenvaentity.AccessGroup, error),
 	isOnline func() bool,
-	onSave func(*entity.Vault, []string),
+	onSave func(*tacpassentity.Vault, []string),
 ) {
 	isEdit := selectedVault != nil
 
-	var currentVault entity.Vault
+	var currentVault tacpassentity.Vault
 	if isEdit {
 		currentVault = *selectedVault
 	}

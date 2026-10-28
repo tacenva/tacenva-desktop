@@ -13,16 +13,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/database"
+	"github.com/tacenva/tacenva-core/config"
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-desktop/internal/ui/discovery"
 	"github.com/tacenva/tacenva-desktop/internal/util"
 	"github.com/tacenva/tacenva-services/api"
-	rCoreApp "github.com/tacenva/tacenva-services/app"
+	tacenvaserviceapp "github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/entity"
-	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/config"
-	coreEntity "github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/keyring"
+	tacpassapp "github.com/tacenva/tacpass-core/app"
 
 	uiapp "github.com/tacenva/tacenva-desktop/internal/ui/app"
 	replicaCore "github.com/tacenva/tacenva-services/app"
@@ -49,9 +49,9 @@ type Screen struct {
 
 func New(
 	window fyne.Window,
-	appDeps *rCoreApp.Deps,
+	appDeps *tacenvaserviceapp.Deps,
 	masterKey string,
-	coreServices *coreApp.Services,
+	coreServices *tacpassapp.Services,
 	sotService *sourceoftruth.Service,
 	discoveryState *discovery.State,
 ) *Screen {
@@ -116,7 +116,7 @@ func New(
 		}
 
 		appDeps.Client.SetToken(
-			nodeContext.SelectedSot.AuthToken,
+			nodeContext.SelectedSot.Auth.Token,
 		)
 
 		appDeps.Client.ConfigureTLS(
@@ -137,17 +137,19 @@ func New(
 		)
 
 		if nodeContext.IsRemote {
-			if nodeContext.SelectedSot.UserStatus != coreEntity.UserStatusApproved {
+			if nodeContext.SelectedSot.Auth.Status != tacenvaentity.UserStatusApproved {
 				err := sotService.CheckStatus(selectedSot)
 				if err != nil {
 					return nil, err
 				}
 
-				if selectedSot.UserStatus != coreEntity.UserStatusApproved {
+				if selectedSot.Auth.Status != tacenvaentity.UserStatusApproved {
 					return nil, errors.New("Status is not approved yet")
 				}
 			}
 		}
+
+		fmt.Println("Jalan 1")
 
 		nodeScreen := uiapp.New(
 			window,
@@ -159,6 +161,7 @@ func New(
 			onBack,
 		)
 
+		fmt.Println("Jalan 2")
 		return nodeScreen.Content, nil
 	}
 
@@ -318,8 +321,8 @@ func New(
 					_, err := sotService.Create(
 						newSot.Hostname,
 						newSot.Address,
-						newSot.KeyPair,
-						newSot.SyncMode,
+						newSot.Auth.KeyPairOfAccessUnit,
+						*newSot.SyncMode,
 					)
 					if err != nil {
 						dialog.ShowError(err, window)
@@ -546,11 +549,11 @@ func showForm(
 	secretKeyEntry.SetMinRowsVisible(4)
 	secretKeyEntry.Wrapping = fyne.TextWrapBreak
 
-	// Saat edit, tampilkan key yang tersimpan dalam format encoded.
-	if sot.KeyPair.PublicKey != "" || sot.KeyPair.PrivateKey != "" {
+	// Show encoded.
+	if sot.Auth.KeyPairOfAccessUnit.PublicKey != "" || sot.Auth.KeyPairOfAccessUnit.PrivateKey != "" {
 		secret, err := util.EncodeSecretKey(
-			sot.KeyPair.PublicKey,
-			sot.KeyPair.PrivateKey,
+			sot.Auth.KeyPairOfAccessUnit.PublicKey,
+			sot.Auth.KeyPairOfAccessUnit.PrivateKey,
 		)
 		if err != nil {
 			dialog.ShowError(err, window)
@@ -568,8 +571,8 @@ func showForm(
 		nil,
 	)
 
-	if sot.SyncMode != "" {
-		syncModeSelect.SetSelected(string(sot.SyncMode))
+	if sot.SyncMode != nil {
+		syncModeSelect.SetSelected(string(*sot.SyncMode))
 	} else {
 		syncModeSelect.SetSelected(string(entity.SyncModeManual))
 	}
@@ -641,13 +644,13 @@ func showForm(
 
 			sot.Hostname = hostnameEntry.Text
 			sot.Address = address
-			sot.KeyPair = *keyring.FromKeys(
+			sot.Auth.KeyPairOfAccessUnit = *keyring.FromKeys(
 				pair.PublicKey,
 				pair.PrivateKey,
 			)
 
 			if address != "localhost" {
-				sot.SyncMode = entity.SyncMode(
+				*sot.SyncMode = entity.SyncMode(
 					syncModeSelect.Selected,
 				)
 			}

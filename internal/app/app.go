@@ -31,6 +31,7 @@ func Run(dev bool) {
 	services := coreapp.NewServices(
 		appDeps.SqliteDB,
 		appDeps.AppDB,
+		appDeps.Config.Server.Hostname,
 	)
 
 	sotService := sourceoftruth.NewService(

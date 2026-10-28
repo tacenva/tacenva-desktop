@@ -11,19 +11,18 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
 	"github.com/tacenva/tacenva-desktop/internal/ui/setting"
-	"github.com/tacenva/tacenva-desktop/internal/ui/vault"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/health"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/entity"
 )
 
 type Screen struct {
-	Content           fyne.CanvasObject
-	vaultScreen       *vault.Screen
+	Content fyne.CanvasObject
+	// vaultScreen       *vault.Screen
 	statusCircle      *canvas.Circle
 	statusLabel       *widget.Label
 	accessControlItem *navItem
@@ -43,16 +42,16 @@ func New(
 	sotService *sourceoftruth.Service,
 	onBack func(),
 ) *Screen {
-	vaultScreen := vault.New(
-		window,
-		appDeps,
-		context,
-		masterKey,
-		coreService,
-		sotService,
-	)
+	// vaultScreen := vault.New(
+	// 	window,
+	// 	appDeps,
+	// 	context,
+	// 	masterKey,
+	// 	coreService,
+	// 	sotService,
+	// )
 
-	isAdmin := context.SelectedSot.Privilege == entity.PrivilegeAdmin
+	isAdmin := context.SelectedSot.Auth.Level == tacenvaentity.LevelAdmin
 
 	var acScreen *accesscontrol.Screen
 	if isAdmin {
@@ -136,12 +135,12 @@ func New(
 
 	mainContent := container.NewMax()
 
-	showVault := func() {
-		mainContent.Objects = []fyne.CanvasObject{
-			vaultScreen.Content,
-		}
-		mainContent.Refresh()
-	}
+	// showVault := func() {
+	// 	mainContent.Objects = []fyne.CanvasObject{
+	// 		vaultScreen.Content,
+	// 	}
+	// 	mainContent.Refresh()
+	// }
 
 	showSettings := func() {
 		mainContent.Objects = []fyne.CanvasObject{
@@ -166,13 +165,15 @@ func New(
 		}
 
 		sidebar, accessControlItem = newSidebar(
-			showVault,
+			// showVault,
+			nil,
 			showAccessControl,
 			showSettings,
 		)
 	} else {
 		sidebar, accessControlItem = newSidebar(
-			showVault,
+			// showVault,
+			nil,
 			nil,
 			showSettings,
 		)
@@ -195,8 +196,8 @@ func New(
 	)
 
 	screen := &Screen{
-		Content:           content,
-		vaultScreen:       vaultScreen,
+		Content: content,
+		// vaultScreen:       vaultScreen,
 		statusCircle:      statusCircle,
 		statusLabel:       statusLabel,
 		accessControlItem: accessControlItem,

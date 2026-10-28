@@ -11,13 +11,13 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/tacenva/tacenva-core/util/credential"
 	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	vaultServicePackage "github.com/tacenva/tacenva-services/app/vault"
 	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/entity"
-	"github.com/tacenva/tacpass-core/util/credential"
+	tacpassentity "github.com/tacenva/tacpass-core/entity"
 )
 
 const hiddenPassword = "••••••••"
@@ -33,23 +33,13 @@ func NewRecordScreen(
 	masterKey string,
 	coreService *coreApp.Services,
 	sotService *sourceoftruth.Service,
-	selectedVault *entity.Vault,
+	selectedVault *tacpassentity.Vault,
 	wrappedKey string,
 	onBack func(),
+
+	vaultService *vaultServicePackage.Service,
+	isWriter bool,
 ) *RecordScreen {
-	vaultService := vaultServicePackage.NewService(
-		appDeps,
-		context,
-		masterKey,
-		coreService.Vault,
-		coreService.VaultRecord,
-		coreService.Auth,
-		sotService,
-	)
-
-	isWriter := context.SelectedSot.Privilege == entity.PrivilegeWrite ||
-		context.SelectedSot.Privilege == entity.PrivilegeAdmin
-
 	isOnline := func() bool {
 		if !context.IsRemote {
 			return true
@@ -62,8 +52,8 @@ func NewRecordScreen(
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search passwords...")
 
-	allVaultRecords := make([]entity.VaultRecord, 0)
-	filteredVaultRecords := make([]entity.VaultRecord, 0)
+	allVaultRecords := make([]tacpassentity.VaultRecord, 0)
+	filteredVaultRecords := make([]tacpassentity.VaultRecord, 0)
 
 	var entryList *widget.List
 	var syncButton *widget.Button
@@ -103,16 +93,16 @@ func NewRecordScreen(
 	}
 
 	filterVaultRecords := func(
-		records []entity.VaultRecord,
+		records []tacpassentity.VaultRecord,
 		query string,
-	) []entity.VaultRecord {
+	) []tacpassentity.VaultRecord {
 		query = strings.ToLower(strings.TrimSpace(query))
 
 		if query == "" {
-			return append([]entity.VaultRecord(nil), records...)
+			return append([]tacpassentity.VaultRecord(nil), records...)
 		}
 
-		filtered := make([]entity.VaultRecord, 0, len(records))
+		filtered := make([]tacpassentity.VaultRecord, 0, len(records))
 
 		for _, record := range records {
 			name := strings.ToLower(record.Name)
@@ -153,10 +143,10 @@ func NewRecordScreen(
 	}
 
 	applyRecords := func(
-		records []entity.VaultRecord,
+		records []tacpassentity.VaultRecord,
 		needSync bool,
 	) {
-		allVaultRecords = append([]entity.VaultRecord(nil), records...)
+		allVaultRecords = append([]tacpassentity.VaultRecord(nil), records...)
 		filteredVaultRecords = filterVaultRecords(
 			allVaultRecords,
 			search.Text,
@@ -294,7 +284,7 @@ func NewRecordScreen(
 					window,
 					nil,
 					isOnline,
-					func(newRecord *entity.VaultRecord) {
+					func(newRecord *tacpassentity.VaultRecord) {
 						runOperation(
 							"Creating Record...",
 							func() error {
@@ -550,7 +540,7 @@ func NewRecordScreen(
 					window,
 					&selectedRecord,
 					isOnline,
-					func(updated *entity.VaultRecord) {
+					func(updated *tacpassentity.VaultRecord) {
 						runOperation(
 							"Saving Record...",
 							func() error {
@@ -730,13 +720,13 @@ func NewRecordScreen(
 
 func showRecordForm(
 	window fyne.Window,
-	selectedRecord *entity.VaultRecord,
+	selectedRecord *tacpassentity.VaultRecord,
 	isOnline func() bool,
-	onSave func(record *entity.VaultRecord),
+	onSave func(record *tacpassentity.VaultRecord),
 ) {
 	isEdit := selectedRecord != nil
 
-	var record entity.VaultRecord
+	var record tacpassentity.VaultRecord
 
 	if isEdit {
 		record = *selectedRecord
