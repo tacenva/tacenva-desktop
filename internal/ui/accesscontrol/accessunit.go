@@ -15,6 +15,8 @@ import (
 
 func newAccessUnitSection(
 	group *entity.AccessGroup,
+	accessUnitCount int64,
+	onViewUsers func(entity.AccessUnit),
 ) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
 		"Access Units",
@@ -157,6 +159,12 @@ func newAccessUnitSection(
 				},
 			)
 
+			viewUsersButton := widget.NewButton("View Users", func() {
+				if onViewUsers != nil {
+					onViewUsers(unit)
+				}
+			})
+
 			actions := []fyne.CanvasObject{
 				updateButton,
 				deleteButton,
@@ -179,6 +187,8 @@ func newAccessUnitSection(
 					},
 				))
 			}
+
+			actions = append(actions, viewUsersButton)
 
 			unitCard := container.NewVBox(
 				container.NewBorder(
