@@ -115,30 +115,30 @@ func New(
 			IsRemote:    selectedSot.Address != "localhost",
 		}
 
-		appDeps.Client.SetToken(
-			nodeContext.SelectedSot.Auth.Token,
-		)
-
-		appDeps.Client.ConfigureTLS(
-			nodeContext.SelectedSot.Address,
-			api.TLSConfig{
-				Fingerprint: nodeContext.SelectedSot.TLSFingerprint,
-
-				OnFirstTrust: func(
-					fingerprint string,
-				) error {
-					nodeContext.SelectedSot.TLSFingerprint = fingerprint
-
-					return sotService.Update(
-						nodeContext.SelectedSot,
-					)
-				},
-			},
-		)
-
 		if nodeContext.IsRemote {
+			appDeps.Client.SetToken(
+				nodeContext.SelectedSot.Auth.Token,
+			)
+
+			appDeps.Client.ConfigureTLS(
+				nodeContext.SelectedSot.Address,
+				api.TLSConfig{
+					Fingerprint: *nodeContext.SelectedSot.TLSFingerprint,
+
+					OnFirstTrust: func(
+						fingerprint string,
+					) error {
+						nodeContext.SelectedSot.TLSFingerprint = &fingerprint
+
+						return sotService.Update(
+							nodeContext.SelectedSot,
+						)
+					},
+				},
+			)
+
 			if nodeContext.SelectedSot.Auth.Status != tacenvaentity.UserStatusApproved {
-				err := sotService.CheckStatus(selectedSot)
+				err = sotService.CheckStatus(selectedSot)
 				if err != nil {
 					return nil, err
 				}
@@ -147,9 +147,14 @@ func New(
 					return nil, errors.New("Status is not approved yet")
 				}
 			}
+			nodeContext.AuthorizedUser = nil
+		} else {
+			authorizedUser, err := coreServices.Auth.GetUserData(nodeContext.SelectedSot.Auth.Token)
+			if err != nil {
+				return nil, err
+			}
+			nodeContext.AuthorizedUser = authorizedUser
 		}
-
-		fmt.Println("Jalan 1")
 
 		nodeScreen := uiapp.New(
 			window,
@@ -158,10 +163,10 @@ func New(
 			masterKey,
 			coreServices,
 			sotService,
+
 			onBack,
 		)
 
-		fmt.Println("Jalan 2")
 		return nodeScreen.Content, nil
 	}
 

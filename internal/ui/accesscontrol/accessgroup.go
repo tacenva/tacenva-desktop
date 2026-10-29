@@ -12,166 +12,12 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/tacenva-core/contract"
-	"github.com/tacenva/tacenva-core/entity"
 )
-
-// Dummy data menggunakan struktur kontrak yang sudah ada.
-// Tidak ada pemanggilan service atau penyimpanan data.
-func dummyAccessGroupTrees() []*contract.AccessGroupTree {
-	backend := entity.AccessGroup{
-		ID:   "01BACKEND00000000000000001",
-		Name: "Backend",
-		AccessUnits: []entity.AccessUnit{
-			{
-				ID:        "01UNITBACKEND000000000001",
-				Name:      "Backend API",
-				GroupID:   "01BACKEND00000000000000001",
-				Level:     entity.LevelAdmin,
-				PublicKey: "",
-			},
-			{
-				ID:        "01UNITBACKEND000000000002",
-				Name:      "Database",
-				GroupID:   "01BACKEND00000000000000001",
-				Level:     entity.LevelWrite,
-				PublicKey: "",
-			},
-		},
-	}
-
-	frontend := entity.AccessGroup{
-		ID:   "01FRONTEND0000000000000001",
-		Name: "Frontend",
-		AccessUnits: []entity.AccessUnit{
-			{
-				ID:        "01UNITFRONTEND0000000001",
-				Name:      "Frontend Dashboard",
-				GroupID:   "01FRONTEND0000000000000001",
-				Level:     entity.LevelRead,
-				PublicKey: "",
-			},
-		},
-	}
-
-	infrastructure := entity.AccessGroup{
-		ID:   "01INFRA000000000000000001",
-		Name: "Infrastructure",
-		AccessUnits: []entity.AccessUnit{
-			{
-				ID:        "01UNITINFRA00000000000001",
-				Name:      "Server Management",
-				GroupID:   "01INFRA000000000000000001",
-				Level:     entity.LevelAdmin,
-				PublicKey: "",
-			},
-		},
-	}
-
-	engineering := entity.AccessGroup{
-		ID:   "01ENGINEERING0000000000001",
-		Name: "Engineering",
-		AccessUnits: []entity.AccessUnit{
-			{
-				ID:        "01UNITENGINEERING00000001",
-				Name:      "Source Code",
-				GroupID:   "01ENGINEERING0000000000001",
-				Level:     entity.LevelWrite,
-				PublicKey: "",
-			},
-		},
-	}
-
-	operations := entity.AccessGroup{
-		ID:   "01OPERATIONS00000000000001",
-		Name: "Operations",
-		AccessUnits: []entity.AccessUnit{
-			{
-				ID:        "01UNITOPERATIONS00000001",
-				Name:      "Deployment",
-				GroupID:   "01OPERATIONS00000000000001",
-				Level:     entity.LevelAdmin,
-				PublicKey: "",
-			},
-		},
-	}
-
-	// Simulasi jumlah unit dan user.
-	backendTree := &contract.AccessGroupTree{
-		Group:           backend,
-		AccessUnitCount: 2,
-		UserCount:       8,
-	}
-
-	frontendTree := &contract.AccessGroupTree{
-		Group:           frontend,
-		AccessUnitCount: 1,
-		UserCount:       5,
-	}
-
-	infrastructureTree := &contract.AccessGroupTree{
-		Group:           infrastructure,
-		AccessUnitCount: 1,
-		UserCount:       3,
-	}
-
-	engineeringTree := &contract.AccessGroupTree{
-		Group:           engineering,
-		AccessUnitCount: 1,
-		UserCount:       12,
-		Children: []contract.AccessGroupHierarchyWithCount{
-			{
-				AccessGroupHierarchy: entity.AccessGroupHierarchy{
-					ParentGroupID: engineering.ID,
-					ChildGroupID:  backend.ID,
-					Child:         backend,
-				},
-				AccessUnitCount: 2,
-				UserCount:       8,
-			},
-			{
-				AccessGroupHierarchy: entity.AccessGroupHierarchy{
-					ParentGroupID: engineering.ID,
-					ChildGroupID:  frontend.ID,
-					Child:         frontend,
-				},
-				AccessUnitCount: 1,
-				UserCount:       5,
-			},
-		},
-	}
-
-	operationsTree := &contract.AccessGroupTree{
-		Group:           operations,
-		AccessUnitCount: 1,
-		UserCount:       6,
-		Children: []contract.AccessGroupHierarchyWithCount{
-			{
-				AccessGroupHierarchy: entity.AccessGroupHierarchy{
-					ParentGroupID: operations.ID,
-					ChildGroupID:  infrastructure.ID,
-					Child:         infrastructure,
-				},
-				AccessUnitCount: 1,
-				UserCount:       3,
-			},
-		},
-	}
-
-	// Semua group tersedia agar navigasi ke subgroup bisa menemukan tree-nya.
-	// Engineering menjadi root awal.
-	return []*contract.AccessGroupTree{
-		engineeringTree,
-		backendTree,
-		frontendTree,
-		operationsTree,
-		infrastructureTree,
-	}
-}
 
 func newAccessGroupCard(
 	group *contract.AccessGroupTree,
 	onExplore func(),
-	onEdit func(string),
+	onEdit func(*contract.AccessGroupTree),
 ) fyne.CanvasObject {
 	if group == nil {
 		return widget.NewLabel("No access group selected")
@@ -188,7 +34,7 @@ func newAccessGroupCard(
 		theme.DocumentCreateIcon(),
 		func() {
 			if onEdit != nil {
-				onEdit(group.Group.Name)
+				onEdit(group)
 			}
 		},
 	)
@@ -214,7 +60,7 @@ func newAccessGroupCard(
 	)
 
 	stats := container.NewGridWithColumns(
-		2,
+		3,
 		newGroupStatCard(
 			"Access Units",
 			fmt.Sprintf("%d", group.AccessUnitCount),
@@ -222,6 +68,10 @@ func newAccessGroupCard(
 		newGroupStatCard(
 			"Users",
 			fmt.Sprintf("%d", group.UserCount),
+		),
+		newGroupStatCard(
+			"Pending",
+			fmt.Sprintf("%d", group.PendingUserCount),
 		),
 	)
 
@@ -231,7 +81,7 @@ func newAccessGroupCard(
 		stats,
 	)
 
-	card := newWhiteBorder(container.NewPadded(content))
+	card := container.NewPadded(content)
 
 	return container.NewHBox(
 		container.New(
@@ -252,14 +102,14 @@ func newGroupStatCard(label, value string) fyne.CanvasObject {
 		Bold: true,
 	}
 
-	return newWhiteBorder(
+	return container.NewPadded(newWhiteBorder(
 		container.NewPadded(
 			container.NewVBox(
 				labelObject,
 				valueObject,
 			),
 		),
-	)
+	))
 }
 
 func newWhiteBorder(content fyne.CanvasObject) fyne.CanvasObject {
@@ -277,9 +127,9 @@ func newWhiteBorder(content fyne.CanvasObject) fyne.CanvasObject {
 func newAccessGroupPanel(
 	group *contract.AccessGroupTree,
 	onSelect func(*contract.AccessGroupTree),
-	onEdit func(string),
+	onEdit func(*contract.AccessGroupTree),
 	onNew func(),
-	onDelete func(string),
+	onDelete func(*contract.AccessGroupTree),
 	onClose func(),
 ) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
@@ -363,8 +213,8 @@ func newAccessGroupPanel(
 func newCompactAccessGroupCard(
 	group *contract.AccessGroupTree,
 	onSelect func(*contract.AccessGroupTree),
-	onEdit func(string),
-	onDelete func(string),
+	onEdit func(*contract.AccessGroupTree),
+	onDelete func(*contract.AccessGroupTree),
 ) fyne.CanvasObject {
 	if group == nil {
 		return widget.NewLabel("Invalid subgroup")
@@ -381,7 +231,7 @@ func newCompactAccessGroupCard(
 		theme.DocumentCreateIcon(),
 		func() {
 			if onEdit != nil {
-				onEdit(group.Group.Name)
+				onEdit(group)
 			}
 		},
 	)
@@ -391,7 +241,7 @@ func newCompactAccessGroupCard(
 		theme.DeleteIcon(),
 		func() {
 			if onDelete != nil {
-				onDelete(group.Group.Name)
+				onDelete(group)
 			}
 		},
 	)
@@ -419,23 +269,25 @@ func newCompactAccessGroupCard(
 	)
 
 	stats := container.NewGridWithColumns(
-		2,
+		3,
 		newCompactStatCard(
-			"Access Units",
+			"Units",
 			fmt.Sprintf("%d", group.AccessUnitCount),
 		),
 		newCompactStatCard(
 			"Users",
 			fmt.Sprintf("%d", group.UserCount),
 		),
+		newCompactStatCard(
+			"Pending",
+			fmt.Sprintf("%d", group.PendingUserCount),
+		),
 	)
 
-	return newWhiteBorder(
-		container.NewPadded(
-			container.NewVBox(
-				header,
-				stats,
-			),
+	return container.NewPadded(
+		container.NewVBox(
+			header,
+			stats,
 		),
 	)
 }

@@ -18,12 +18,6 @@ func newUserListSection(
 	onRevoke func(entity.User),
 	onDelete func(entity.User),
 ) fyne.CanvasObject {
-	// title := widget.NewLabelWithStyle(
-	// 	"Users",
-	// 	fyne.TextAlignLeading,
-	// 	fyne.TextStyle{Bold: true},
-	// )
-
 	rows := container.NewVBox()
 
 	if len(users) == 0 {
@@ -52,29 +46,31 @@ func newUserListSection(
 			fyne.TextStyle{Bold: true},
 		)
 
-		statusLabel := widget.NewLabel(
-			"Status: " + statusText,
-		)
+		var buttons []fyne.CanvasObject
 
-		approveButton := widget.NewButton(
-			"Approve",
-			func() {
-				if onApprove != nil {
-					onApprove(currentUser)
-				}
-			},
-		)
+		switch currentUser.Status {
+		case entity.UserStatusPending:
+			buttons = append(buttons, widget.NewButton(
+				"Approve",
+				func() {
+					if onApprove != nil {
+						onApprove(currentUser)
+					}
+				},
+			))
 
-		revokeButton := widget.NewButton(
-			"Revoke",
-			func() {
-				if onRevoke != nil {
-					onRevoke(currentUser)
-				}
-			},
-		)
+		case entity.UserStatusApproved:
+			buttons = append(buttons, widget.NewButton(
+				"Revoke",
+				func() {
+					if onRevoke != nil {
+						onRevoke(currentUser)
+					}
+				},
+			))
+		}
 
-		deleteButton := widget.NewButton(
+		buttons = append(buttons, widget.NewButton(
 			"Delete",
 			func() {
 				dialog.ShowConfirm(
@@ -91,23 +87,14 @@ func newUserListSection(
 					window,
 				)
 			},
-		)
+		))
 
-		actions := container.NewHBox(
-			approveButton,
-			revokeButton,
-			deleteButton,
-		)
-
-		userDetails := container.NewVBox(
-			hostnameLabel,
-			statusLabel,
-		)
+		actions := container.NewHBox(buttons...)
 
 		row := container.NewBorder(
 			nil,
 			nil,
-			userDetails,
+			hostnameLabel,
 			actions,
 			nil,
 		)
