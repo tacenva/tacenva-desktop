@@ -68,6 +68,16 @@ func newUserListSection(
 					}
 				},
 			))
+
+		case entity.UserStatusRevoked:
+			buttons = append(buttons, widget.NewButton(
+				"Reactivate",
+				func() {
+					if onApprove != nil {
+						onApprove(currentUser)
+					}
+				},
+			))
 		}
 
 		buttons = append(buttons, widget.NewButton(

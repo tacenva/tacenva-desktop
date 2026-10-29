@@ -65,6 +65,7 @@ func New(
 
 	var loadGroups func()
 	var loadUnits func(groupID string)
+	var refreshSelectedUnit func()
 
 	var selectedGroupTree *contract.AccessGroupTree
 	var navigationStack []*contract.AccessGroupTree
@@ -77,7 +78,7 @@ func New(
 	var render func()
 	var selectGroup func(*contract.AccessGroupTree)
 
-	var saveAccessUnit func(*entity.AccessUnit) error
+	var saveAccessUnit AccessUnitSaveCallback
 	var deleteAccessUnit func(*entity.AccessUnit)
 
 	panelOpen := false
@@ -203,22 +204,29 @@ func New(
 				updatedGroup := *group
 				updatedGroup.Name = newName
 
-				if err := accesscontrolService.UpdateGroup(
-					&updatedGroup,
-				); err != nil {
-					dialog.ShowError(err, window)
-					return
-				}
-
-				group.Name = newName
-
-				dialog.ShowInformation(
-					"Success",
-					fmt.Sprintf(
-						"Access group %q updated successfully.",
-						updatedGroup.Name,
-					),
+				runWithLoading(
 					window,
+					"Updating Access Group",
+					"Saving access group changes...",
+					func() error {
+						return accesscontrolService.UpdateGroup(
+							&updatedGroup,
+						)
+					},
+					func() {
+						group.Name = newName
+
+						dialog.ShowInformation(
+							"Success",
+							fmt.Sprintf(
+								"Access group %q updated successfully.",
+								updatedGroup.Name,
+							),
+							window,
+						)
+
+						loadGroups()
+					},
 				)
 			},
 			window,
@@ -240,20 +248,27 @@ func New(
 					return
 				}
 
-				if err := accesscontrolService.DeleteGroup(
-					group.ID,
-				); err != nil {
-					dialog.ShowError(err, window)
-					return
-				}
-
-				dialog.ShowInformation(
-					"Success",
-					fmt.Sprintf(
-						"Subgroup %q deleted successfully.",
-						group.Name,
-					),
+				runWithLoading(
 					window,
+					"Deleting Access Group",
+					"Deleting access group...",
+					func() error {
+						return accesscontrolService.DeleteGroup(
+							group.ID,
+						)
+					},
+					func() {
+						dialog.ShowInformation(
+							"Success",
+							fmt.Sprintf(
+								"Subgroup %q deleted successfully.",
+								group.Name,
+							),
+							window,
+						)
+
+						loadGroups()
+					},
 				)
 			},
 			window,
@@ -350,29 +365,33 @@ func New(
 				parentAccess := parentAccessCheck.Checked
 
 				go func() {
-					err := accesscontrolService.CreateGroup(
-						newGroup,
-						adminUnit,
-						parentAccess,
+					runWithLoading(
+						window,
+						"Creating Access Group",
+						"Creating access group, please wait...",
+						func() error {
+							return accesscontrolService.CreateGroup(
+								newGroup,
+								adminUnit,
+								parentAccess,
+							)
+						},
+						func() {
+							fyne.Do(func() {
+								dialog.ShowInformation(
+									"Success",
+									fmt.Sprintf(
+										"Access group %q created successfully.",
+										groupName,
+									),
+									window,
+								)
+
+								loadGroups()
+							})
+						},
 					)
 
-					fyne.Do(func() {
-						if err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
-
-						dialog.ShowInformation(
-							"Success",
-							fmt.Sprintf(
-								"Access group %q created successfully.",
-								groupName,
-							),
-							window,
-						)
-
-						loadGroups()
-					})
 				}()
 			},
 			window,
@@ -394,88 +413,97 @@ func New(
 
 	// =========================================================
 	// SAVE ACCESS UNIT
-	// Database ditulis sekali, kemudian cache RAM diperbarui.
-	// Tidak memanggil loadUnits().
 	// =========================================================
 
 	saveAccessUnit = func(
 		accessUnit *entity.AccessUnit,
-	) error {
+		onSuccess func(),
+		onError func(error),
+	) {
 		if selectedGroupTree == nil {
-			return fmt.Errorf("select an access group first")
+			onError(fmt.Errorf("select an access group first"))
+			return
+		}
+
+		if accessUnit == nil {
+			onError(fmt.Errorf("access unit is invalid"))
+			return
 		}
 
 		groupID := selectedGroupTree.Group.ID
+		isCreate := accessUnit.ID == ""
 
-		if accessUnit.ID == "" {
-			accessUnit.GroupID = groupID
-			accessUnit.SotID = selectedGroupTree.Group.SotID
+		unitCopy := *accessUnit
 
-			if err := accesscontrolService.CreateUnit(
-				accessUnit,
-			); err != nil {
-				return err
-			}
-			selectedGroupTree.AccessUnitCount++
-		} else {
-			if err := accesscontrolService.UpdateUnit(
-				accessUnit,
-			); err != nil {
-				return err
-			}
+		if isCreate {
+			unitCopy.GroupID = groupID
+			unitCopy.SotID = selectedGroupTree.Group.SotID
 		}
 
-		// Gunakan cache group yang aktif.
-		groupUnits, exists := unitsByGroup[groupID]
-		if !exists {
-			groupUnits = units
-		}
-
-		found := false
-
-		for i := range groupUnits {
-			if groupUnits[i].ID != accessUnit.ID {
-				continue
-			}
-
-			// Mengganti entity saja. Counter dan field contract
-			// lainnya tetap dipertahankan.
-			groupUnits[i].AccessUnit = *accessUnit
-
-			found = true
-			break
-		}
-
-		if !found {
-			groupUnits = append(
-				groupUnits,
-				contract.AccessUnitWithUserCount{
-					AccessUnit: *accessUnit,
-				},
-			)
-		}
-
-		// Sinkronkan cache RAM.
-		unitsByGroup[groupID] = groupUnits
-		units = groupUnits
-
-		// Kalau halaman Users sedang menampilkan unit ini,
-		// update entity-nya tanpa membuang daftar Users.
-		if selectedUnit != nil &&
-			selectedUnit.ID == accessUnit.ID {
-			selectedUnit.AccessUnit = *accessUnit
-		}
-
-		// Render ulang menggunakan data RAM terbaru.
-		render()
-
-		dialog.ShowInformation(
-			"Success",
-			"Access unit saved successfully.",
+		runWithLoading(
 			window,
-		)
+			"Saving Access Unit",
+			"Saving access unit changes...",
+			func() error {
+				if isCreate {
+					return accesscontrolService.CreateUnit(&unitCopy)
+				}
 
-		return nil
+				return accesscontrolService.UpdateUnit(&unitCopy)
+			},
+			func() {
+				// Sinkronkan hasil ke objek form.
+				*accessUnit = unitCopy
+
+				// Update cache hanya setelah request berhasil.
+				groupUnits := unitsByGroup[groupID]
+				found := false
+
+				for i := range groupUnits {
+					if groupUnits[i].ID != unitCopy.ID {
+						continue
+					}
+
+					groupUnits[i].AccessUnit = unitCopy
+					found = true
+					break
+				}
+
+				if !found {
+					groupUnits = append(
+						groupUnits,
+						contract.AccessUnitWithUserCount{
+							AccessUnit: unitCopy,
+						},
+					)
+
+					selectedGroupTree.AccessUnitCount++
+				}
+
+				unitsByGroup[groupID] = groupUnits
+
+				if selectedGroupTree.Group.ID == groupID {
+					units = groupUnits
+				}
+
+				if selectedUnit != nil &&
+					selectedUnit.ID == unitCopy.ID {
+					selectedUnit.AccessUnit = unitCopy
+				}
+
+				render()
+
+				dialog.ShowInformation(
+					"Success",
+					"Access unit saved successfully.",
+					window,
+				)
+
+				if onSuccess != nil {
+					onSuccess()
+				}
+			},
+		)
 	}
 
 	// =========================================================
@@ -488,16 +516,10 @@ func New(
 		}
 
 		if selectedGroupTree == nil {
-			dialog.ShowInformation(
-				"Error",
-				"Select an access group first.",
+			dialog.ShowError(
+				fmt.Errorf("select an access group first"),
 				window,
 			)
-			return
-		}
-
-		if err := accesscontrolService.DeleteUnit(au.ID); err != nil {
-			dialog.ShowError(err, window)
 			return
 		}
 
@@ -506,48 +528,110 @@ func New(
 			groupID = selectedGroupTree.Group.ID
 		}
 
-		groupUnits, exists := unitsByGroup[groupID]
-		if !exists {
-			groupUnits = units
-		}
-
-		// Hapus unit dari slice di RAM.
-		filteredUnits := make(
-			[]contract.AccessUnitWithUserCount,
-			0,
-			len(groupUnits),
-		)
-
-		selectedGroupTree.AccessUnitCount--
-		for _, unit := range groupUnits {
-			if unit.ID != au.ID {
-				filteredUnits = append(filteredUnits, unit)
-			}
-			selectedGroupTree.UserCount -= unit.UserCount
-			selectedGroupTree.PendingUserCount -= unit.PendingCount
-		}
-
-		unitsByGroup[groupID] = filteredUnits
-
-		if selectedGroupTree.Group.ID == groupID {
-			units = filteredUnits
-		}
-
-		if selectedUnit != nil && selectedUnit.ID == au.ID {
-			selectedUnit = nil
-			showingUsers = false
-		}
-
-		dialog.ShowInformation(
-			"Success",
-			fmt.Sprintf(
-				"Access unit %q deleted successfully.",
-				au.Name,
-			),
+		runWithLoading(
 			window,
-		)
+			"Deleting Access Unit",
+			"Deleting access unit...",
+			func() error {
+				return accesscontrolService.DeleteUnit(au.ID)
+			},
+			func() {
+				groupUnits := unitsByGroup[groupID]
 
-		render()
+				filteredUnits := make(
+					[]contract.AccessUnitWithUserCount,
+					0,
+					len(groupUnits),
+				)
+
+				for _, unit := range groupUnits {
+					if unit.ID == au.ID {
+						selectedGroupTree.AccessUnitCount--
+						selectedGroupTree.UserCount -= unit.UserCount
+						selectedGroupTree.PendingUserCount -= unit.PendingCount
+						continue
+					}
+
+					filteredUnits = append(filteredUnits, unit)
+				}
+
+				unitsByGroup[groupID] = filteredUnits
+
+				if selectedGroupTree.Group.ID == groupID {
+					units = filteredUnits
+				}
+
+				if selectedUnit != nil && selectedUnit.ID == au.ID {
+					selectedUnit = nil
+					showingUsers = false
+				}
+
+				render()
+
+				dialog.ShowInformation(
+					"Success",
+					fmt.Sprintf(
+						"Access unit %q deleted successfully.",
+						au.Name,
+					),
+					window,
+				)
+			},
+		)
+	}
+
+	onRevoke := func(
+		unit *entity.AccessUnit,
+		revoked bool,
+	) {
+		if unit == nil {
+			dialog.ShowError(
+				errors.New("access unit is invalid"),
+				window,
+			)
+			return
+		}
+
+		action := "Reactivating"
+		if revoked {
+			action = "Revoking"
+		}
+
+		runWithLoading(
+			window,
+			action+" Access Unit",
+			action+" access unit...",
+			func() error {
+				return accesscontrolService.SetRevokeUnit(
+					unit.ID,
+					revoked,
+				)
+			},
+			func() {
+				groupID := unit.GroupID
+				if groupID == "" && selectedGroupTree != nil {
+					groupID = selectedGroupTree.Group.ID
+				}
+
+				if groupID != "" {
+					loadUnits(groupID)
+				}
+
+				status := "is active"
+				if revoked {
+					status = "is revoked"
+				}
+
+				dialog.ShowInformation(
+					"Success",
+					fmt.Sprintf(
+						"Access unit %q "+status+" successfully.",
+						unit.Name,
+					),
+					window,
+				)
+			},
+		)
 	}
 
 	// =========================================================
@@ -628,31 +712,102 @@ func New(
 				newUserListSection(
 					window,
 					selectedUnit.Users,
+
+					// Approve user
 					func(user entity.User) {
-						showUserActionPlaceholder(
+						showUserActionDialog(
 							window,
 							"Approve User",
 							fmt.Sprintf(
 								"Approve user %q?",
 								user.Hostname,
 							),
+							func() {
+								runWithLoading(
+									window,
+									"Approving User",
+									"Approving user...",
+									func() error {
+										return accesscontrolService.SetApprovalUser(
+											user.ID,
+											false,
+										)
+									},
+									func() {
+										refreshSelectedUnit()
+
+										dialog.ShowInformation(
+											"Success",
+											fmt.Sprintf(
+												"User %q approved successfully.",
+												user.Hostname,
+											),
+											window,
+										)
+									},
+								)
+							},
 						)
 					},
+
+					// Revoke user
 					func(user entity.User) {
-						showUserActionPlaceholder(
+						showUserActionDialog(
 							window,
 							"Revoke User",
 							fmt.Sprintf(
 								"Revoke access for user %q?",
 								user.Hostname,
 							),
+							func() {
+								runWithLoading(
+									window,
+									"Revoking User",
+									"Revoking user access...",
+									func() error {
+										return accesscontrolService.SetApprovalUser(
+											user.ID,
+											true,
+										)
+									},
+									func() {
+										refreshSelectedUnit()
+
+										dialog.ShowInformation(
+											"Success",
+											fmt.Sprintf(
+												"User %q revoked successfully.",
+												user.Hostname,
+											),
+											window,
+										)
+									},
+								)
+							},
 						)
 					},
+
+					// Delete user
 					func(user entity.User) {
-						dialog.ShowInformation(
-							"Not Implemented",
-							"Delete user has not been connected to the service yet.",
+						runWithLoading(
 							window,
+							"Deleting User",
+							"Deleting user...",
+							func() error {
+								return accesscontrolService.DeleteUser(user.ID)
+							},
+							func() {
+								refreshSelectedUnit()
+
+								dialog.ShowInformation(
+									"Success",
+									fmt.Sprintf(
+										"User %q deleted successfully.",
+										user.Hostname,
+									),
+									window,
+								)
+							},
 						)
 					},
 				),
@@ -684,6 +839,7 @@ func New(
 					showUnitUsers,
 					saveAccessUnit,
 					deleteAccessUnit,
+					onRevoke,
 				),
 			}
 
@@ -739,6 +895,44 @@ func New(
 		}
 
 		updateLayout()
+	}
+
+	refreshSelectedUnit = func() {
+		if selectedUnit == nil {
+			return
+		}
+
+		unitID := selectedUnit.ID
+		groupID := selectedUnit.GroupID
+
+		go func() {
+			result, err := accesscontrolService.UnitList(groupID)
+
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(err, window)
+					return
+				}
+
+				units = result
+				unitsByGroup[groupID] = result
+
+				for i := range result {
+					if result[i].ID == unitID {
+						refreshedUnit := result[i]
+						selectedUnit = &refreshedUnit
+
+						render()
+						return
+					}
+				}
+
+				dialog.ShowError(
+					fmt.Errorf("access unit %q not found after refresh", unitID),
+					window,
+				)
+			})
+		}()
 	}
 
 	// =========================================================
@@ -945,6 +1139,7 @@ func New(
 						showUnitUsers,
 						saveAccessUnit,
 						deleteAccessUnit,
+						onRevoke,
 					),
 				}
 
@@ -964,10 +1159,11 @@ func New(
 	}
 }
 
-func showUserActionPlaceholder(
+func showUserActionDialog(
 	window fyne.Window,
 	title string,
 	message string,
+	onConfirm func(),
 ) {
 	dialog.ShowConfirm(
 		title,
@@ -977,11 +1173,9 @@ func showUserActionPlaceholder(
 				return
 			}
 
-			dialog.ShowInformation(
-				"Not Implemented",
-				"This action has not been connected to the service yet.",
-				window,
-			)
+			if onConfirm != nil {
+				onConfirm()
+			}
 		},
 		window,
 	)

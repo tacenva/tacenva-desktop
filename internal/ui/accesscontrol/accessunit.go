@@ -14,11 +14,23 @@ import (
 	"github.com/tacenva/tacenva-core/entity"
 )
 
+type AccessUnitSaveCallback func(
+	unit *entity.AccessUnit,
+	onSuccess func(),
+	onError func(error),
+)
+
+type AccessUnitRevokeCallback func(
+	unit *entity.AccessUnit,
+	revoked bool,
+)
+
 func newAccessUnitSection(
 	units []contract.AccessUnitWithUserCount,
 	onViewUsers func(contract.AccessUnitWithUserCount),
-	onSave func(*entity.AccessUnit) error,
+	onSave AccessUnitSaveCallback,
 	onDelete func(*entity.AccessUnit),
+	onRevoke AccessUnitRevokeCallback,
 ) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
 		"Access Units",
@@ -123,8 +135,9 @@ func newAccessUnitSection(
 						theme.VisibilityIcon(),
 						func() {
 							showRevokeAccessUnitDialog(
-								currentUnit.Name,
+								&currentUnit.AccessUnit,
 								true,
+								onRevoke,
 							)
 						},
 					),
@@ -137,8 +150,9 @@ func newAccessUnitSection(
 						theme.VisibilityOffIcon(),
 						func() {
 							showRevokeAccessUnitDialog(
-								currentUnit.Name,
+								&currentUnit.AccessUnit,
 								false,
+								onRevoke,
 							)
 						},
 					),
@@ -177,7 +191,7 @@ func newAccessUnitSection(
 
 func showAccessUnitDialog(
 	unit *contract.AccessUnitWithUserCount,
-	onSave func(*entity.AccessUnit) error,
+	onSave AccessUnitSaveCallback,
 ) {
 	windows := fyne.CurrentApp().Driver().AllWindows()
 	if len(windows) == 0 {
@@ -227,7 +241,8 @@ func showAccessUnitDialog(
 
 	autoApproveCheck.SetChecked(accessUnit.AutoApprove)
 
-	dialog.ShowForm(
+	var formDialog *dialog.FormDialog
+	formDialog = dialog.NewForm(
 		title,
 		saveLabel,
 		"Cancel",
@@ -262,27 +277,31 @@ func showAccessUnitDialog(
 			}
 
 			if onSave == nil {
-				dialog.ShowInformation(
-					"Error",
-					"Save handler is not configured.",
+				dialog.ShowError(
+					fmt.Errorf("fungsi penyimpanan Access Unit belum tersedia"),
 					window,
 				)
 				return
 			}
 
 			accessUnit.Name = name
-			accessUnit.Level = entity.AccessLevel(
-				levelSelect.Selected,
-			)
+			accessUnit.Level = entity.AccessLevel(levelSelect.Selected)
 			accessUnit.AutoApprove = autoApproveCheck.Checked
 
-			if err := onSave(accessUnit); err != nil {
-				dialog.ShowError(err, window)
-				return
-			}
+			onSave(
+				accessUnit,
+				func() {
+					formDialog.Hide()
+				},
+				func(err error) {
+					dialog.ShowError(err, window)
+				},
+			)
 		},
 		window,
 	)
+
+	formDialog.Show()
 }
 
 func showDeleteAccessUnitDialog(
@@ -323,8 +342,9 @@ func showDeleteAccessUnitDialog(
 }
 
 func showRevokeAccessUnitDialog(
-	unitName string,
+	unit *entity.AccessUnit,
 	revoked bool,
+	onRevoke AccessUnitRevokeCallback,
 ) {
 	windows := fyne.CurrentApp().Driver().AllWindows()
 	if len(windows) == 0 {
@@ -333,37 +353,35 @@ func showRevokeAccessUnitDialog(
 
 	window := windows[0]
 
-	action := "Revoke"
+	action := "revoke"
 	actionTitle := "Revoke Access Unit"
-	successMessage := "revoked"
 
-	if revoked {
-		action = "Reactivate"
+	if !revoked {
+		action = "reactivate"
 		actionTitle = "Reactivate Access Unit"
-		successMessage = "reactivated"
 	}
 
 	dialog.ShowConfirm(
 		actionTitle,
 		fmt.Sprintf(
 			"Are you sure you want to %s access unit %q?",
-			strings.ToLower(action),
-			unitName,
+			action,
+			unit.Name,
 		),
 		func(confirmed bool) {
 			if !confirmed {
 				return
 			}
 
-			// TODO: Sambungkan ke service Revoke/Reactivate.
-			dialog.ShowInformation(
-				"Not Implemented",
-				fmt.Sprintf(
-					"Revoke/reactivate service has not been connected yet. Requested action: %s.",
-					successMessage,
-				),
-				window,
-			)
+			if onRevoke == nil {
+				dialog.ShowError(
+					fmt.Errorf("revoke handler is not configured"),
+					window,
+				)
+				return
+			}
+
+			onRevoke(unit, revoked)
 		},
 		window,
 	)

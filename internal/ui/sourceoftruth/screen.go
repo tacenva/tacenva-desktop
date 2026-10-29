@@ -327,7 +327,7 @@ func New(
 						newSot.Hostname,
 						newSot.Address,
 						newSot.Auth.KeyPairOfAccessUnit,
-						*newSot.SyncMode,
+						newSot.SyncMode,
 					)
 					if err != nil {
 						dialog.ShowError(err, window)
@@ -555,7 +555,7 @@ func showForm(
 	secretKeyEntry.Wrapping = fyne.TextWrapBreak
 
 	// Show encoded.
-	if sot.Auth.KeyPairOfAccessUnit.PublicKey != "" || sot.Auth.KeyPairOfAccessUnit.PrivateKey != "" {
+	if sot.Auth != nil && (sot.Auth.KeyPairOfAccessUnit.PublicKey != "" || sot.Auth.KeyPairOfAccessUnit.PrivateKey != "") {
 		secret, err := util.EncodeSecretKey(
 			sot.Auth.KeyPairOfAccessUnit.PublicKey,
 			sot.Auth.KeyPairOfAccessUnit.PrivateKey,
@@ -576,8 +576,8 @@ func showForm(
 		nil,
 	)
 
-	if sot.SyncMode != nil {
-		syncModeSelect.SetSelected(string(*sot.SyncMode))
+	if sot.SyncMode != "" {
+		syncModeSelect.SetSelected(string(sot.SyncMode))
 	} else {
 		syncModeSelect.SetSelected(string(entity.SyncModeManual))
 	}
@@ -649,13 +649,16 @@ func showForm(
 
 			sot.Hostname = hostnameEntry.Text
 			sot.Address = address
+			if sot.Auth == nil {
+				sot.Auth = &entity.Auth{}
+			}
 			sot.Auth.KeyPairOfAccessUnit = *keyring.FromKeys(
 				pair.PublicKey,
 				pair.PrivateKey,
 			)
 
 			if address != "localhost" {
-				*sot.SyncMode = entity.SyncMode(
+				sot.SyncMode = entity.SyncMode(
 					syncModeSelect.Selected,
 				)
 			}
