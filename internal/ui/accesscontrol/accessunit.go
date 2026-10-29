@@ -17,7 +17,7 @@ import (
 func newAccessUnitSection(
 	units []contract.AccessUnitWithUserCount,
 	onViewUsers func(contract.AccessUnitWithUserCount),
-	onSave func(*entity.AccessUnit),
+	onSave func(*entity.AccessUnit) error,
 	onDelete func(*entity.AccessUnit),
 ) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(
@@ -177,31 +177,32 @@ func newAccessUnitSection(
 
 func showAccessUnitDialog(
 	unit *contract.AccessUnitWithUserCount,
-	onSave func(*entity.AccessUnit),
+	onSave func(*entity.AccessUnit) error,
 ) {
-	window := fyne.CurrentApp().Driver().AllWindows()[0]
+	windows := fyne.CurrentApp().Driver().AllWindows()
+	if len(windows) == 0 {
+		return
+	}
+
+	window := windows[0]
 
 	isUpdate := unit != nil
 	title := "Create Access Unit"
 	saveLabel := "Create"
 
-	accessUnit := entity.AccessUnit{
-		Level:       entity.LevelRead,
-		AutoApprove: false,
-	}
+	var accessUnit *entity.AccessUnit
 
 	if isUpdate {
 		title = "Update Access Unit"
 		saveLabel = "Save"
 
-		accessUnit.ID = unit.ID
-		accessUnit.Name = unit.Name
-		accessUnit.Level = unit.Level
-		accessUnit.AutoApprove = unit.AutoApprove
-		accessUnit.GroupID = unit.GroupID
-		accessUnit.SotID = unit.SotID
-		accessUnit.PublicKey = unit.PublicKey
-		accessUnit.Revoked = unit.Revoked
+		accessUnitCopy := unit.AccessUnit
+		accessUnit = &accessUnitCopy
+	} else {
+		accessUnit = &entity.AccessUnit{
+			Level:       entity.LevelRead,
+			AutoApprove: false,
+		}
 	}
 
 	nameEntry := widget.NewEntry()
@@ -216,12 +217,14 @@ func showAccessUnitDialog(
 		},
 		nil,
 	)
+
 	levelSelect.SetSelected(string(accessUnit.Level))
 
 	autoApproveCheck := widget.NewCheck(
 		"Automatically approve users",
 		nil,
 	)
+
 	autoApproveCheck.SetChecked(accessUnit.AutoApprove)
 
 	dialog.ShowForm(
@@ -239,21 +242,43 @@ func showAccessUnitDialog(
 			}
 
 			name := strings.TrimSpace(nameEntry.Text)
-			if name == "" || levelSelect.Selected == "" {
+
+			if name == "" {
 				dialog.ShowInformation(
-					"Validation",
-					"Name and permission are required.",
+					"Validation Error",
+					"Access unit name is required.",
+					window,
+				)
+				return
+			}
+
+			if levelSelect.Selected == "" {
+				dialog.ShowInformation(
+					"Validation Error",
+					"Permission is required.",
+					window,
+				)
+				return
+			}
+
+			if onSave == nil {
+				dialog.ShowInformation(
+					"Error",
+					"Save handler is not configured.",
 					window,
 				)
 				return
 			}
 
 			accessUnit.Name = name
-			accessUnit.Level = entity.AccessLevel(levelSelect.Selected)
+			accessUnit.Level = entity.AccessLevel(
+				levelSelect.Selected,
+			)
 			accessUnit.AutoApprove = autoApproveCheck.Checked
 
-			if onSave != nil {
-				onSave(&accessUnit)
+			if err := onSave(accessUnit); err != nil {
+				dialog.ShowError(err, window)
+				return
 			}
 		},
 		window,
@@ -264,7 +289,12 @@ func showDeleteAccessUnitDialog(
 	unit *entity.AccessUnit,
 	onDelete func(*entity.AccessUnit),
 ) {
-	window := fyne.CurrentApp().Driver().AllWindows()[0]
+	windows := fyne.CurrentApp().Driver().AllWindows()
+	if len(windows) == 0 {
+		return
+	}
+
+	window := windows[0]
 
 	dialog.ShowConfirm(
 		"Delete Access Unit",
@@ -292,8 +322,16 @@ func showDeleteAccessUnitDialog(
 	)
 }
 
-func showRevokeAccessUnitDialog(unitName string, revoked bool) {
-	window := fyne.CurrentApp().Driver().AllWindows()[0]
+func showRevokeAccessUnitDialog(
+	unitName string,
+	revoked bool,
+) {
+	windows := fyne.CurrentApp().Driver().AllWindows()
+	if len(windows) == 0 {
+		return
+	}
+
+	window := windows[0]
 
 	action := "Revoke"
 	actionTitle := "Revoke Access Unit"
@@ -317,7 +355,7 @@ func showRevokeAccessUnitDialog(unitName string, revoked bool) {
 				return
 			}
 
-			// TODO: Panggil service Revoke/Reactivate Access Unit.
+			// TODO: Sambungkan ke service Revoke/Reactivate.
 			dialog.ShowInformation(
 				"Not Implemented",
 				fmt.Sprintf(

@@ -31,7 +31,11 @@ func New(
 	context *app.Context,
 	coreService *coreApp.Services,
 ) *Screen {
-	accesscontrolService := accesscontrol.NewService(appDeps, context, coreService.AccessControl)
+	accesscontrolService := accesscontrol.NewService(
+		appDeps,
+		context,
+		coreService.AccessControl,
+	)
 
 	var loadingUnits bool
 	var unitRequestID uint64
@@ -58,16 +62,23 @@ func New(
 
 	var groupTree []contract.AccessGroupTree
 	var units []contract.AccessUnitWithUserCount
+
 	var loadGroups func()
 	var loadUnits func(groupID string)
 
 	var selectedGroupTree *contract.AccessGroupTree
 	var navigationStack []*contract.AccessGroupTree
 	var selectedUnit *contract.AccessUnitWithUserCount
-	var unitsByGroup = make(map[string][]contract.AccessUnitWithUserCount)
+
+	unitsByGroup := make(
+		map[string][]contract.AccessUnitWithUserCount,
+	)
 
 	var render func()
 	var selectGroup func(*contract.AccessGroupTree)
+
+	var saveAccessUnit func(*entity.AccessUnit) error
+	var deleteAccessUnit func(*entity.AccessUnit)
 
 	panelOpen := false
 	showingUsers := false
@@ -93,7 +104,6 @@ func New(
 		"Back",
 		theme.NavigateBackIcon(),
 		func() {
-			// Dari halaman Users, kembali ke Access Units.
 			if showingUsers {
 				showingUsers = false
 				selectedUnit = nil
@@ -101,7 +111,6 @@ func New(
 				return
 			}
 
-			// Navigasi parent group seperti sebelumnya.
 			if len(navigationStack) <= 1 {
 				return
 			}
@@ -110,6 +119,7 @@ func New(
 			selectedGroupTree = navigationStack[len(navigationStack)-1]
 
 			units = unitsByGroup[selectedGroupTree.Group.ID]
+
 			render()
 		},
 	)
@@ -145,8 +155,12 @@ func New(
 
 	updateLayout := func() {
 		if panelOpen && !showingUsers {
-			split := container.NewHSplit(mainContent, panelContainer)
+			split := container.NewHSplit(
+				mainContent,
+				panelContainer,
+			)
 			split.SetOffset(0.68)
+
 			root.Objects = []fyne.CanvasObject{split}
 		} else {
 			root.Objects = []fyne.CanvasObject{mainContent}
@@ -189,7 +203,9 @@ func New(
 				updatedGroup := *group
 				updatedGroup.Name = newName
 
-				if err := accesscontrolService.UpdateGroup(&updatedGroup); err != nil {
+				if err := accesscontrolService.UpdateGroup(
+					&updatedGroup,
+				); err != nil {
 					dialog.ShowError(err, window)
 					return
 				}
@@ -224,7 +240,9 @@ func New(
 					return
 				}
 
-				if err := accesscontrolService.DeleteGroup(group.ID); err != nil {
+				if err := accesscontrolService.DeleteGroup(
+					group.ID,
+				); err != nil {
 					dialog.ShowError(err, window)
 					return
 				}
@@ -364,17 +382,177 @@ func New(
 		form.Show()
 	}
 
-	// Membuka halaman Users di area konten utama, bukan dialog.
 	showUnitUsers := func(unit contract.AccessUnitWithUserCount) {
 		currentUnit := unit
+
 		selectedUnit = &currentUnit
 		showingUsers = true
-
-		// Tutup panel subgroup ketika pindah halaman.
 		panelOpen = false
 
 		render()
 	}
+
+	// =========================================================
+	// SAVE ACCESS UNIT
+	// Database ditulis sekali, kemudian cache RAM diperbarui.
+	// Tidak memanggil loadUnits().
+	// =========================================================
+
+	saveAccessUnit = func(
+		accessUnit *entity.AccessUnit,
+	) error {
+		if selectedGroupTree == nil {
+			return fmt.Errorf("select an access group first")
+		}
+
+		groupID := selectedGroupTree.Group.ID
+
+		if accessUnit.ID == "" {
+			accessUnit.GroupID = groupID
+			accessUnit.SotID = selectedGroupTree.Group.SotID
+
+			if err := accesscontrolService.CreateUnit(
+				accessUnit,
+			); err != nil {
+				return err
+			}
+			selectedGroupTree.AccessUnitCount++
+		} else {
+			if err := accesscontrolService.UpdateUnit(
+				accessUnit,
+			); err != nil {
+				return err
+			}
+		}
+
+		// Gunakan cache group yang aktif.
+		groupUnits, exists := unitsByGroup[groupID]
+		if !exists {
+			groupUnits = units
+		}
+
+		found := false
+
+		for i := range groupUnits {
+			if groupUnits[i].ID != accessUnit.ID {
+				continue
+			}
+
+			// Mengganti entity saja. Counter dan field contract
+			// lainnya tetap dipertahankan.
+			groupUnits[i].AccessUnit = *accessUnit
+
+			found = true
+			break
+		}
+
+		if !found {
+			groupUnits = append(
+				groupUnits,
+				contract.AccessUnitWithUserCount{
+					AccessUnit: *accessUnit,
+				},
+			)
+		}
+
+		// Sinkronkan cache RAM.
+		unitsByGroup[groupID] = groupUnits
+		units = groupUnits
+
+		// Kalau halaman Users sedang menampilkan unit ini,
+		// update entity-nya tanpa membuang daftar Users.
+		if selectedUnit != nil &&
+			selectedUnit.ID == accessUnit.ID {
+			selectedUnit.AccessUnit = *accessUnit
+		}
+
+		// Render ulang menggunakan data RAM terbaru.
+		render()
+
+		dialog.ShowInformation(
+			"Success",
+			"Access unit saved successfully.",
+			window,
+		)
+
+		return nil
+	}
+
+	// =========================================================
+	// DELETE ACCESS UNIT
+	// =========================================================
+
+	deleteAccessUnit = func(au *entity.AccessUnit) {
+		if au == nil {
+			return
+		}
+
+		if selectedGroupTree == nil {
+			dialog.ShowInformation(
+				"Error",
+				"Select an access group first.",
+				window,
+			)
+			return
+		}
+
+		if err := accesscontrolService.DeleteUnit(au.ID); err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+
+		groupID := au.GroupID
+		if groupID == "" {
+			groupID = selectedGroupTree.Group.ID
+		}
+
+		groupUnits, exists := unitsByGroup[groupID]
+		if !exists {
+			groupUnits = units
+		}
+
+		// Hapus unit dari slice di RAM.
+		filteredUnits := make(
+			[]contract.AccessUnitWithUserCount,
+			0,
+			len(groupUnits),
+		)
+
+		selectedGroupTree.AccessUnitCount--
+		for _, unit := range groupUnits {
+			if unit.ID != au.ID {
+				filteredUnits = append(filteredUnits, unit)
+			}
+			selectedGroupTree.UserCount -= unit.UserCount
+			selectedGroupTree.PendingUserCount -= unit.PendingCount
+		}
+
+		unitsByGroup[groupID] = filteredUnits
+
+		if selectedGroupTree.Group.ID == groupID {
+			units = filteredUnits
+		}
+
+		if selectedUnit != nil && selectedUnit.ID == au.ID {
+			selectedUnit = nil
+			showingUsers = false
+		}
+
+		dialog.ShowInformation(
+			"Success",
+			fmt.Sprintf(
+				"Access unit %q deleted successfully.",
+				au.Name,
+			),
+			window,
+		)
+
+		render()
+	}
+
+	// =========================================================
+	// RENDER
+	// =========================================================
 
 	render = func() {
 		if selectedGroupTree == nil {
@@ -431,7 +609,10 @@ func New(
 			unitInfoCard := container.NewHBox(
 				container.New(
 					layout.NewGridWrapLayout(
-						fyne.NewSize(680, unitInfo.MinSize().Height),
+						fyne.NewSize(
+							680,
+							unitInfo.MinSize().Height,
+						),
 					),
 					unitInfo,
 				),
@@ -451,14 +632,20 @@ func New(
 						showUserActionPlaceholder(
 							window,
 							"Approve User",
-							fmt.Sprintf("Approve user %q?", user.Hostname),
+							fmt.Sprintf(
+								"Approve user %q?",
+								user.Hostname,
+							),
 						)
 					},
 					func(user entity.User) {
 						showUserActionPlaceholder(
 							window,
 							"Revoke User",
-							fmt.Sprintf("Revoke access for user %q?", user.Hostname),
+							fmt.Sprintf(
+								"Revoke access for user %q?",
+								user.Hostname,
+							),
 						)
 					},
 					func(user entity.User) {
@@ -476,8 +663,8 @@ func New(
 			return
 		}
 
-		// Halaman Access Group dan Access Units.
 		groupContainer.RemoveAll()
+
 		groupContainer.Add(
 			newAccessGroupCard(
 				selectedGroupTree,
@@ -487,6 +674,7 @@ func New(
 				},
 			),
 		)
+
 		groupContainer.Refresh()
 
 		if !loadingUnits {
@@ -494,70 +682,11 @@ func New(
 				newAccessUnitSection(
 					units,
 					showUnitUsers,
-					func(accessUnit *entity.AccessUnit) {
-						window := fyne.CurrentApp().Driver().AllWindows()[0]
-
-						if selectedGroupTree == nil {
-							dialog.ShowInformation(
-								"Error",
-								"Select an access group first.",
-								window,
-							)
-							return
-						}
-
-						if accessUnit.ID == "" {
-							// Create Access Unit
-							if err := accesscontrolService.CreateUnit(accessUnit); err != nil {
-								dialog.ShowError(err, window)
-								return
-							}
-						} else {
-							// Update Access Unit
-							if err := accesscontrolService.UpdateUnit(accessUnit); err != nil {
-								dialog.ShowError(err, window)
-								return
-							}
-						}
-
-						dialog.ShowInformation(
-							"Success",
-							"Access unit saved successfully.",
-							window,
-						)
-
-						loadUnits(selectedGroupTree.Group.ID)
-					},
-					func(au *entity.AccessUnit) {
-						window := fyne.CurrentApp().Driver().AllWindows()[0]
-
-						if selectedGroupTree == nil {
-							dialog.ShowInformation(
-								"Error",
-								"Select an access group first.",
-								window,
-							)
-							return
-						}
-
-						if err := accesscontrolService.DeleteUnit(au.ID); err != nil {
-							dialog.ShowError(err, window)
-							return
-						}
-
-						dialog.ShowInformation(
-							"Success",
-							fmt.Sprintf(
-								"Access unit %q deleted successfully.",
-								au.Name,
-							),
-							window,
-						)
-
-						loadUnits(selectedGroupTree.Group.ID)
-					},
+					saveAccessUnit,
+					deleteAccessUnit,
 				),
 			}
+
 			unitContainer.Refresh()
 		}
 
@@ -573,6 +702,7 @@ func New(
 				widget.NewLabel(""),
 			),
 		)
+
 		contentBody.Add(groupContainer)
 
 		contentBody.Add(
@@ -581,6 +711,7 @@ func New(
 				widget.NewLabel(""),
 			),
 		)
+
 		contentBody.Add(unitContainer)
 
 		if panelOpen {
@@ -603,11 +734,16 @@ func New(
 					},
 				),
 			}
+
 			panelContainer.Refresh()
 		}
 
 		updateLayout()
 	}
+
+	// =========================================================
+	// GROUP NAVIGATION
+	// =========================================================
 
 	selectGroup = func(group *contract.AccessGroupTree) {
 		if group == nil {
@@ -617,8 +753,6 @@ func New(
 		showingUsers = false
 		selectedUnit = nil
 
-		// Jika group sudah ada di navigation stack,
-		// kembali ke posisi group tersebut.
 		for i, existing := range navigationStack {
 			if existing.Group.ID == group.Group.ID {
 				navigationStack = navigationStack[:i+1]
@@ -630,12 +764,14 @@ func New(
 				if _, exists := unitsByGroup[group.Group.ID]; !exists {
 					loadUnits(group.Group.ID)
 				}
+
 				return
 			}
 		}
 
 		selectedGroupTree = group
 		navigationStack = append(navigationStack, group)
+
 		accesscontrolService.SetSelectedGroup(&group.Group)
 
 		units = unitsByGroup[group.Group.ID]
@@ -646,16 +782,21 @@ func New(
 		}
 	}
 
+	// =========================================================
+	// LOAD GROUPS
+	// =========================================================
+
 	loadGroups = func() {
 		reloadButton.Disable()
 
 		groupLoadingBar.Start()
+
 		groupContainer.Objects = []fyne.CanvasObject{
 			groupLoadingView,
 		}
+
 		groupContainer.Refresh()
 
-		// Simpan posisi navigasi saat ini.
 		currentGroupID := ""
 		if selectedGroupTree != nil {
 			currentGroupID = selectedGroupTree.Group.ID
@@ -663,11 +804,14 @@ func New(
 
 		go func() {
 			var parentGroup *entity.AccessGroup
+
 			if selectedGroupTree != nil {
 				parentGroup = &selectedGroupTree.Group
 			}
 
-			result, err := accesscontrolService.GroupWithChildren(parentGroup)
+			result, err := accesscontrolService.GroupWithChildren(
+				parentGroup,
+			)
 
 			fyne.Do(func() {
 				groupLoadingBar.Stop()
@@ -675,8 +819,11 @@ func New(
 
 				if err != nil {
 					groupContainer.Objects = []fyne.CanvasObject{
-						widget.NewLabel("Failed to load access groups."),
+						widget.NewLabel(
+							"Failed to load access groups.",
+						),
 					}
+
 					groupContainer.Refresh()
 					dialog.ShowError(err, window)
 					return
@@ -692,18 +839,18 @@ func New(
 					groupContainer.Objects = []fyne.CanvasObject{
 						widget.NewLabel("No access groups found."),
 					}
+
 					groupContainer.Refresh()
 
 					unitContainer.Objects = []fyne.CanvasObject{
 						widget.NewLabel("No access group selected."),
 					}
-					unitContainer.Refresh()
 
+					unitContainer.Refresh()
 					updateLayout()
 					return
 				}
 
-				// Kalau belum ada group terpilih, gunakan root pertama.
 				if currentGroupID == "" || selectedGroupTree == nil {
 					navigationStack = nil
 					selectedGroupTree = nil
@@ -711,8 +858,6 @@ func New(
 					return
 				}
 
-				// GroupWithChildren dipanggil dengan parent aktif.
-				// Pertahankan group aktif jika masih ada di hasil.
 				var refreshedGroup *contract.AccessGroupTree
 
 				for i := range groupTree {
@@ -723,8 +868,6 @@ func New(
 				}
 
 				if refreshedGroup != nil {
-					// Ganti pointer group aktif dengan data terbaru,
-					// tanpa mereset stack.
 					selectedGroupTree = refreshedGroup
 
 					if len(navigationStack) > 0 {
@@ -732,21 +875,29 @@ func New(
 					}
 
 					delete(unitsByGroup, currentGroupID)
+
 					render()
 					loadUnits(currentGroupID)
 					return
 				}
 
-				// Jika hasil query tidak menyertakan group aktif,
-				// jangan diam-diam pindah ke root pertama.
 				groupContainer.Objects = []fyne.CanvasObject{
-					widget.NewLabel("Unable to refresh the selected access group."),
+					widget.NewLabel(
+						"Unable to refresh the selected access group.",
+					),
 				}
+
 				groupContainer.Refresh()
 				updateLayout()
 			})
 		}()
 	}
+
+	// =========================================================
+	// LOAD UNITS
+	// Dipakai saat pertama memilih group dan saat Reload.
+	// Bukan dipakai setelah save atau delete.
+	// =========================================================
 
 	loadUnits = func(groupID string) {
 		unitRequestID++
@@ -758,12 +909,11 @@ func New(
 		unitContainer.Objects = []fyne.CanvasObject{
 			unitLoadingView,
 		}
+
 		unitContainer.Refresh()
 
 		go func() {
-			result, err := accesscontrolService.UnitList(
-				groupID,
-			)
+			result, err := accesscontrolService.UnitList(groupID)
 
 			fyne.Do(func() {
 				if requestID != unitRequestID {
@@ -775,8 +925,11 @@ func New(
 
 				if err != nil {
 					unitContainer.Objects = []fyne.CanvasObject{
-						widget.NewLabel("Failed to load access units."),
+						widget.NewLabel(
+							"Failed to load access units.",
+						),
 					}
+
 					unitContainer.Refresh()
 					dialog.ShowError(err, window)
 					return
@@ -784,74 +937,17 @@ func New(
 
 				units = result
 				unitsByGroup[groupID] = result
+
+				// Callback sama dengan yang digunakan render().
 				unitContainer.Objects = []fyne.CanvasObject{
 					newAccessUnitSection(
 						units,
 						showUnitUsers,
-						func(accessUnit *entity.AccessUnit) {
-							window := fyne.CurrentApp().Driver().AllWindows()[0]
-
-							if selectedGroupTree == nil {
-								dialog.ShowInformation(
-									"Error",
-									"Select an access group first.",
-									window,
-								)
-								return
-							}
-
-							if accessUnit.ID == "" {
-								// Create Access Unit
-								if err := accesscontrolService.CreateUnit(accessUnit); err != nil {
-									dialog.ShowError(err, window)
-									return
-								}
-							} else {
-								// Update Access Unit
-								if err := accesscontrolService.UpdateUnit(accessUnit); err != nil {
-									dialog.ShowError(err, window)
-									return
-								}
-							}
-
-							dialog.ShowInformation(
-								"Success",
-								"Access unit saved successfully.",
-								window,
-							)
-
-							loadUnits(selectedGroupTree.Group.ID)
-						},
-						func(au *entity.AccessUnit) {
-							window := fyne.CurrentApp().Driver().AllWindows()[0]
-
-							if selectedGroupTree == nil {
-								dialog.ShowInformation(
-									"Error",
-									"Select an access group first.",
-									window,
-								)
-								return
-							}
-
-							if err := accesscontrolService.DeleteUnit(au.ID); err != nil {
-								dialog.ShowError(err, window)
-								return
-							}
-
-							dialog.ShowInformation(
-								"Success",
-								fmt.Sprintf(
-									"Access unit %q deleted successfully.",
-									au.Name,
-								),
-								window,
-							)
-
-							loadUnits(selectedGroupTree.Group.ID)
-						},
+						saveAccessUnit,
+						deleteAccessUnit,
 					),
 				}
+
 				unitContainer.Refresh()
 			})
 		}()
