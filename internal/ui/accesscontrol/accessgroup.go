@@ -95,21 +95,27 @@ func newAccessGroupCard(
 
 func newGroupStatCard(label, value string) fyne.CanvasObject {
 	labelObject := widget.NewLabel(label)
+	labelObject.Alignment = fyne.TextAlignCenter
 
 	valueObject := canvas.NewText(value, theme.ForegroundColor())
 	valueObject.TextSize = 30
 	valueObject.TextStyle = fyne.TextStyle{
 		Bold: true,
 	}
+	valueObject.Alignment = fyne.TextAlignCenter
 
-	return container.NewPadded(newWhiteBorder(
-		container.NewPadded(
-			container.NewVBox(
-				labelObject,
-				valueObject,
+	return container.New(
+		layout.NewCustomPaddedLayout(16, 16, 8, 8),
+		newWhiteBorder(
+			container.New(
+				layout.NewCustomPaddedLayout(8, 16, 0, 0),
+				container.NewVBox(
+					labelObject,
+					valueObject,
+				),
 			),
 		),
-	))
+	)
 }
 
 func newWhiteBorder(content fyne.CanvasObject) fyne.CanvasObject {
@@ -176,12 +182,11 @@ func newAccessGroupPanel(
 		)
 	} else {
 		for _, child := range group.Children {
-			childGroup := child.Child
-
 			subgroupTree := &contract.AccessGroupTree{
-				Group:           childGroup,
-				AccessUnitCount: child.AccessUnitCount,
-				UserCount:       child.UserCount,
+				Group:            child.Child,
+				AccessUnitCount:  child.AccessUnitCount,
+				UserCount:        child.UserCount,
+				PendingUserCount: child.PendingUserCount,
 			}
 
 			subgroupList.Add(

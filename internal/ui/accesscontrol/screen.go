@@ -119,6 +119,9 @@ func New(
 			navigationStack = navigationStack[:len(navigationStack)-1]
 			selectedGroupTree = navigationStack[len(navigationStack)-1]
 
+			// Sinkronkan selected group dengan service.
+			accesscontrolService.SetSelectedGroup(&selectedGroupTree.Group)
+
 			units = unitsByGroup[selectedGroupTree.Group.ID]
 
 			render()
@@ -144,7 +147,7 @@ func New(
 		pageSubtitle,
 	)
 
-	mainContent := container.NewPadded(
+	normalMainContent := container.NewPadded(
 		container.NewScroll(
 			container.NewVBox(
 				header,
@@ -153,6 +156,8 @@ func New(
 			),
 		),
 	)
+
+	var mainContent fyne.CanvasObject = normalMainContent
 
 	updateLayout := func() {
 		if panelOpen && !showingUsers {
@@ -702,124 +707,141 @@ func New(
 				),
 			)
 
-			contentBody.Objects = []fyne.CanvasObject{
+			userHeader := container.NewVBox(
 				unitInfoCard,
 				widget.NewLabelWithStyle(
 					"Users",
 					fyne.TextAlignLeading,
 					fyne.TextStyle{Bold: true},
 				),
-				newUserListSection(
-					window,
-					selectedUnit.Users,
+			)
 
-					// Approve user
-					func(user entity.User) {
-						showUserActionDialog(
-							window,
-							"Approve User",
-							fmt.Sprintf(
-								"Approve user %q?",
-								user.Hostname,
-							),
-							func() {
-								runWithLoading(
-									window,
-									"Approving User",
-									"Approving user...",
-									func() error {
-										return accesscontrolService.SetApprovalUser(
-											user.ID,
-											false,
-										)
-									},
-									func() {
-										refreshSelectedUnit()
+			userTable := newUserListSection(
+				window,
+				selectedUnit.Users,
 
-										dialog.ShowInformation(
-											"Success",
-											fmt.Sprintf(
-												"User %q approved successfully.",
-												user.Hostname,
-											),
-											window,
-										)
-									},
-								)
-							},
-						)
-					},
+				// Approve user
+				func(user entity.User) {
+					showUserActionDialog(
+						window,
+						"Approve User",
+						fmt.Sprintf("Approve user %q?", user.Hostname),
+						func() {
+							runWithLoading(
+								window,
+								"Approving User",
+								"Approving user...",
+								func() error {
+									return accesscontrolService.SetApprovalUser(
+										user.ID,
+										false,
+									)
+								},
+								func() {
+									refreshSelectedUnit()
 
-					// Revoke user
-					func(user entity.User) {
-						showUserActionDialog(
-							window,
-							"Revoke User",
-							fmt.Sprintf(
-								"Revoke access for user %q?",
-								user.Hostname,
-							),
-							func() {
-								runWithLoading(
-									window,
-									"Revoking User",
-									"Revoking user access...",
-									func() error {
-										return accesscontrolService.SetApprovalUser(
-											user.ID,
-											true,
-										)
-									},
-									func() {
-										refreshSelectedUnit()
+									dialog.ShowInformation(
+										"Success",
+										fmt.Sprintf(
+											"User %q approved successfully.",
+											user.Hostname,
+										),
+										window,
+									)
+								},
+							)
+						},
+					)
+				},
 
-										dialog.ShowInformation(
-											"Success",
-											fmt.Sprintf(
-												"User %q revoked successfully.",
-												user.Hostname,
-											),
-											window,
-										)
-									},
-								)
-							},
-						)
-					},
+				// Revoke user
+				func(user entity.User) {
+					showUserActionDialog(
+						window,
+						"Revoke User",
+						fmt.Sprintf(
+							"Revoke access for user %q?",
+							user.Hostname,
+						),
+						func() {
+							runWithLoading(
+								window,
+								"Revoking User",
+								"Revoking user access...",
+								func() error {
+									return accesscontrolService.SetApprovalUser(
+										user.ID,
+										true,
+									)
+								},
+								func() {
+									refreshSelectedUnit()
 
-					// Delete user
-					func(user entity.User) {
-						runWithLoading(
-							window,
-							"Deleting User",
-							"Deleting user...",
-							func() error {
-								return accesscontrolService.DeleteUser(user.ID)
-							},
-							func() {
-								refreshSelectedUnit()
+									dialog.ShowInformation(
+										"Success",
+										fmt.Sprintf(
+											"User %q revoked successfully.",
+											user.Hostname,
+										),
+										window,
+									)
+								},
+							)
+						},
+					)
+				},
 
-								dialog.ShowInformation(
-									"Success",
-									fmt.Sprintf(
-										"User %q deleted successfully.",
-										user.Hostname,
-									),
-									window,
-								)
-							},
-						)
-					},
+				// Delete user
+				func(user entity.User) {
+					runWithLoading(
+						window,
+						"Deleting User",
+						"Deleting user...",
+						func() error {
+							return accesscontrolService.DeleteUser(user.ID)
+						},
+						func() {
+							refreshSelectedUnit()
+
+							dialog.ShowInformation(
+								"Success",
+								fmt.Sprintf(
+									"User %q deleted successfully.",
+									user.Hostname,
+								),
+								window,
+							)
+						},
+					)
+				},
+			)
+
+			// Table mendapatkan seluruh ruang vertikal yang tersedia.
+			userContent := container.NewBorder(
+				userHeader,
+				nil,
+				nil,
+				nil,
+				userTable,
+			)
+
+			// Tampilan Users tidak menggunakan Scroll halaman luar.
+			mainContent = container.NewPadded(
+				container.NewBorder(
+					header,
+					nil,
+					nil,
+					nil,
+					userContent,
 				),
-			}
+			)
 
-			contentBody.Refresh()
 			updateLayout()
 			return
 		}
 
+		mainContent = normalMainContent
 		groupContainer.RemoveAll()
-
 		groupContainer.Add(
 			newAccessGroupCard(
 				selectedGroupTree,
@@ -947,33 +969,66 @@ func New(
 		showingUsers = false
 		selectedUnit = nil
 
+		groupID := group.Group.ID
+
+		// Cek apakah group sudah ada di navigation stack.
+		stackIndex := -1
+
 		for i, existing := range navigationStack {
-			if existing.Group.ID == group.Group.ID {
-				navigationStack = navigationStack[:i+1]
-				selectedGroupTree = existing
-
-				units = unitsByGroup[group.Group.ID]
-				render()
-
-				if _, exists := unitsByGroup[group.Group.ID]; !exists {
-					loadUnits(group.Group.ID)
-				}
-
-				return
+			if existing.Group.ID == groupID {
+				stackIndex = i
+				break
 			}
 		}
 
-		selectedGroupTree = group
-		navigationStack = append(navigationStack, group)
+		// Tandai loading dan ambil data tree terbaru.
+		go func() {
+			result, err := accesscontrolService.GroupWithChildren(
+				&group.Group,
+			)
 
-		accesscontrolService.SetSelectedGroup(&group.Group)
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(err, window)
+					return
+				}
 
-		units = unitsByGroup[group.Group.ID]
-		render()
+				if len(result) == 0 {
+					dialog.ShowInformation(
+						"Information",
+						"No access group data found.",
+						window,
+					)
+					return
+				}
 
-		if _, exists := unitsByGroup[group.Group.ID]; !exists {
-			loadUnits(group.Group.ID)
-		}
+				// Gunakan hasil terbaru dari GroupWithChildren.
+				selectedGroupTree = &result[0]
+
+				accesscontrolService.SetSelectedGroup(
+					&selectedGroupTree.Group,
+				)
+
+				// Update navigation stack.
+				if stackIndex >= 0 {
+					navigationStack = navigationStack[:stackIndex+1]
+					navigationStack[stackIndex] = selectedGroupTree
+				} else {
+					navigationStack = append(
+						navigationStack,
+						selectedGroupTree,
+					)
+				}
+
+				units = unitsByGroup[groupID]
+
+				render()
+
+				if _, exists := unitsByGroup[groupID]; !exists {
+					loadUnits(groupID)
+				}
+			})
+		}()
 	}
 
 	// =========================================================

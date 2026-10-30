@@ -2,11 +2,14 @@ package accesscontrol
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -57,129 +60,170 @@ func newAccessUnitSection(
 	)
 
 	if len(units) == 0 {
-		unitList.Add(
+		unitList.Add(container.NewCenter(
+			widget.NewLabel("No access units available."),
+		))
+	}
+
+	for _, unit := range units {
+		currentUnit := unit
+
+		unitName := currentUnit.Name
+		if unitName == "" {
+			unitName = "Unnamed Access Unit"
+		}
+
+		nameLabel := widget.NewLabelWithStyle(
+			unitName,
+			fyne.TextAlignLeading,
+			fyne.TextStyle{Bold: true},
+		)
+
+		statusColor := theme.SuccessColor()
+		if currentUnit.Revoked {
+			statusColor = theme.ErrorColor()
+		}
+
+		statusIndicator := canvas.NewCircle(statusColor)
+		statusIndicator.Resize(fyne.NewSize(8, 8))
+
+		nameWithStatus := container.NewHBox(
+			nameLabel,
 			container.NewCenter(
-				widget.NewLabel(
-					"No access units assigned to this group.",
+				container.NewGridWrap(
+					fyne.NewSize(8, 8),
+					statusIndicator,
 				),
 			),
 		)
-	} else {
-		for _, unit := range units {
-			currentUnit := unit
 
-			unitName := widget.NewLabelWithStyle(
-				currentUnit.Name,
-				fyne.TextAlignLeading,
-				fyne.TextStyle{Bold: true},
-			)
-
-			metadataText := fmt.Sprintf(
+		metadata := widget.NewLabel(
+			fmt.Sprintf(
 				"Permission: %s  •  Users: %d",
 				currentUnit.Level,
-				len(currentUnit.Users),
-			)
+				currentUnit.UserCount,
+			),
+		)
 
-			if currentUnit.Revoked {
-				metadataText += "  •  Revoked"
-			}
+		// Three-dot menu
+		menuButton := widget.NewButtonWithIcon(
+			"",
+			theme.MoreVerticalIcon(),
+			nil,
+		)
 
-			metadata := widget.NewLabel(metadataText)
-
-			updateButton := widget.NewButtonWithIcon(
-				"Update",
-				theme.DocumentCreateIcon(),
-				func() {
-					showAccessUnitDialog(&currentUnit, onSave)
-				},
-			)
-
-			deleteButton := widget.NewButtonWithIcon(
-				"Delete",
-				theme.DeleteIcon(),
-				func() {
-					current := entity.AccessUnit{
-						ID:          currentUnit.ID,
-						Name:        currentUnit.Name,
-						GroupID:     currentUnit.GroupID,
-						SotID:       currentUnit.SotID,
-						Level:       currentUnit.Level,
-						PublicKey:   currentUnit.PublicKey,
-						AutoApprove: currentUnit.AutoApprove,
-						Revoked:     currentUnit.Revoked,
-					}
-
-					showDeleteAccessUnitDialog(&current, onDelete)
-				},
-			)
-
-			viewUsersButton := widget.NewButton(
-				"View Users",
-				func() {
-					if onViewUsers != nil {
-						onViewUsers(currentUnit)
-					}
-				},
-			)
-
-			actions := []fyne.CanvasObject{
-				updateButton,
-				deleteButton,
-			}
-
-			if currentUnit.Revoked {
-				actions = append(
-					actions,
-					widget.NewButtonWithIcon(
-						"Reactivate",
-						theme.VisibilityIcon(),
-						func() {
-							showRevokeAccessUnitDialog(
-								&currentUnit.AccessUnit,
-								true,
-								onRevoke,
-							)
-						},
-					),
+		menu := fyne.NewMenu("",
+			fyne.NewMenuItem("Update", func() {
+				showAccessUnitDialog(
+					&currentUnit,
+					onSave,
 				)
-			} else {
-				actions = append(
-					actions,
-					widget.NewButtonWithIcon(
-						"Revoke",
-						theme.VisibilityOffIcon(),
-						func() {
-							showRevokeAccessUnitDialog(
-								&currentUnit.AccessUnit,
-								false,
-								onRevoke,
-							)
-						},
-					),
-				)
-			}
+			}),
+			fyne.NewMenuItem("Delete", func() {
+				if onDelete != nil {
+					showDeleteAccessUnitDialog(
+						&currentUnit.AccessUnit,
+						onDelete,
+					)
+				}
+			}),
+		)
 
-			actions = append(actions, viewUsersButton)
+		menu.Items[0].Icon = theme.DocumentCreateIcon()
+		menu.Items[1].Icon = theme.DeleteIcon()
 
-			unitCard := container.NewVBox(
-				container.NewBorder(
-					nil,
-					nil,
-					unitName,
-					container.NewHBox(actions...),
-					nil,
-				),
-				metadata,
-			)
+		menuButton.OnTapped = func() {
+			canvas := fyne.CurrentApp().Driver().CanvasForObject(menuButton)
 
-			unitList.Add(
-				widget.NewCard(
-					"",
-					"",
-					container.NewPadded(unitCard),
-				),
+			widget.ShowPopUpMenuAtRelativePosition(
+				menu,
+				canvas,
+				fyne.NewPos(-95, 0),
+				menuButton,
 			)
 		}
+
+		menuButton.Importance = widget.LowImportance
+
+		// Header
+		cardHeader := container.NewBorder(
+			nil,
+			nil,
+			nameWithStatus,
+			menuButton,
+			nil,
+		)
+
+		// List Users button
+		var revokeButton *widget.Button
+		if currentUnit.Revoked {
+			revokeButton = widget.NewButtonWithIcon(
+				"  Reactivate",
+				theme.VisibilityIcon(),
+				func() {
+					if onRevoke != nil {
+						showRevokeAccessUnitDialog(
+							&currentUnit.AccessUnit,
+							false,
+							onRevoke,
+						)
+					}
+				},
+			)
+		} else {
+			revokeButton = widget.NewButtonWithIcon(
+				"  Revoke",
+				theme.VisibilityOffIcon(),
+				func() {
+					if onRevoke != nil {
+						showRevokeAccessUnitDialog(
+							&currentUnit.AccessUnit,
+							true,
+							onRevoke,
+						)
+					}
+				},
+			)
+		}
+
+		revokeButton.Importance = widget.MediumImportance
+
+		viewUsersButton := widget.NewButtonWithIcon(
+			"List Users  ",
+			theme.NavigateNextIcon(),
+			func() {
+				if onViewUsers != nil {
+					onViewUsers(currentUnit)
+				}
+			},
+		)
+
+		viewUsersButton.IconPlacement = widget.ButtonIconTrailingText
+
+		// Bottom-right action
+		cardFooter := container.NewHBox(
+			revokeButton,
+			layout.NewSpacer(),
+			viewUsersButton,
+		)
+
+		cardContent := container.NewVBox(
+			cardHeader,
+			metadata,
+			container.NewGridWrap(
+				fyne.NewSize(1, 10),
+				canvas.NewRectangle(color.Transparent),
+			),
+			cardFooter,
+		)
+
+		unitList.Add(
+			widget.NewCard(
+				"",
+				"",
+				container.NewPadded(cardContent),
+			),
+		)
 	}
 
 	return container.NewVBox(
@@ -242,6 +286,7 @@ func showAccessUnitDialog(
 	autoApproveCheck.SetChecked(accessUnit.AutoApprove)
 
 	var formDialog *dialog.FormDialog
+
 	formDialog = dialog.NewForm(
 		title,
 		saveLabel,
@@ -278,14 +323,18 @@ func showAccessUnitDialog(
 
 			if onSave == nil {
 				dialog.ShowError(
-					fmt.Errorf("fungsi penyimpanan Access Unit belum tersedia"),
+					fmt.Errorf(
+						"fungsi penyimpanan Access Unit belum tersedia",
+					),
 					window,
 				)
 				return
 			}
 
 			accessUnit.Name = name
-			accessUnit.Level = entity.AccessLevel(levelSelect.Selected)
+			accessUnit.Level = entity.AccessLevel(
+				levelSelect.Selected,
+			)
 			accessUnit.AutoApprove = autoApproveCheck.Checked
 
 			onSave(
@@ -374,8 +423,9 @@ func showRevokeAccessUnitDialog(
 			}
 
 			if onRevoke == nil {
-				dialog.ShowError(
-					fmt.Errorf("revoke handler is not configured"),
+				dialog.ShowInformation(
+					"Error",
+					"Revoke handler is not configured.",
 					window,
 				)
 				return
