@@ -47,7 +47,6 @@ func New(
 		context,
 		coreService.Vault,
 		coreService.VaultRecord,
-		coreService.Auth,
 		sotService,
 	)
 
@@ -483,15 +482,10 @@ func New(
 		}
 
 		selectedVault := filteredVaults[id]
-		wrappedKey := selectedVault.WrappedKey
-
-		if !context.IsRemote {
-			var err error
-			wrappedKey, err = vaultService.GetWrappedVaultKey(selectedVault.ID)
-			if err != nil {
-				dialog.ShowError(err, window)
-				return
-			}
+		wrappedKey, err := vaultService.GetWrappedVaultKey(selectedVault.ID)
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
 		}
 
 		recordScreen := NewRecordScreen(

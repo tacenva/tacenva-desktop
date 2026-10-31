@@ -14,6 +14,7 @@ import (
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-desktop/internal/ui/accesscontrol"
 	"github.com/tacenva/tacenva-desktop/internal/ui/setting"
+	"github.com/tacenva/tacenva-desktop/internal/ui/vault"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/health"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
@@ -42,14 +43,14 @@ func New(
 	sotService *sourceoftruth.Service,
 	onBack func(),
 ) *Screen {
-	// vaultScreen := vault.New(
-	// 	window,
-	// 	appDeps,
-	// 	context,
-	// 	masterKey,
-	// 	coreService,
-	// 	sotService,
-	// )
+	vaultScreen := vault.New(
+		window,
+		appDeps,
+		context,
+		masterKey,
+		coreService,
+		sotService,
+	)
 
 	isAdmin := context.SelectedSot.Auth.Level == tacenvaentity.LevelAdmin
 
@@ -135,12 +136,12 @@ func New(
 
 	mainContent := container.NewMax()
 
-	// showVault := func() {
-	// 	mainContent.Objects = []fyne.CanvasObject{
-	// 		vaultScreen.Content,
-	// 	}
-	// 	mainContent.Refresh()
-	// }
+	showVault := func() {
+		mainContent.Objects = []fyne.CanvasObject{
+			vaultScreen.Content,
+		}
+		mainContent.Refresh()
+	}
 
 	showSettings := func() {
 		mainContent.Objects = []fyne.CanvasObject{
@@ -165,8 +166,8 @@ func New(
 		}
 
 		sidebar, accessControlItem = newSidebar(
-			// showVault,
-			nil,
+			showVault,
+			// nil,
 			showAccessControl,
 			showSettings,
 		)

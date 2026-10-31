@@ -171,10 +171,20 @@ func NewRecordScreen(
 		updateActionStates()
 
 		go func() {
-			records, needSync, err := vaultService.ListRecord(
+			var (
+				records  []tacpassentity.VaultRecord
+				needSync bool
+				err      error
+			)
+			err = vaultService.SelectVault(
 				selectedVault,
 				wrappedKey,
 			)
+			if err == nil {
+				records, needSync, err = vaultService.ListRecord(
+					selectedVault,
+				)
+			}
 
 			fyne.Do(func() {
 				setListLoading(false)
@@ -291,7 +301,6 @@ func NewRecordScreen(
 								_, err := vaultService.AppendRecord(
 									selectedVault,
 									newRecord,
-									wrappedKey,
 								)
 								return err
 							},
@@ -547,7 +556,6 @@ func NewRecordScreen(
 								_, err := vaultService.UpdateRecord(
 									selectedVault,
 									updated,
-									wrappedKey,
 								)
 								return err
 							},
@@ -660,10 +668,20 @@ func NewRecordScreen(
 	}
 
 	go func() {
-		records, needSync, err := vaultService.ListRecord(
+		var (
+			records  []tacpassentity.VaultRecord
+			needSync bool
+			err      error
+		)
+		err = vaultService.SelectVault(
 			selectedVault,
 			wrappedKey,
 		)
+		if err == nil {
+			records, needSync, err = vaultService.ListRecord(
+				selectedVault,
+			)
+		}
 
 		fyne.Do(func() {
 			setListLoading(false)
