@@ -33,14 +33,6 @@ func New(
 	coreService *coreApp.Services,
 	sotService *sourceoftruth.Service,
 ) *Screen {
-	// if context.IsRemote {
-	// 	err := coreService.Vault.Replica.SetConfig(vaultDir, masterKey)
-	// 	if err != nil {
-	// 		return nil
-	// 	}
-	// } else {
-	// 	coreService.Vault.Sot.SetConfig(vaultDir)
-	// }
 	vaultService := vaultServicePackage.NewService(
 		appDeps,
 		context,
@@ -49,15 +41,7 @@ func New(
 		sotService,
 	)
 
-	isWriter := context.SelectedSot.Auth.Level == tacenvaentity.LevelWrite ||
-		context.SelectedSot.Auth.Level == tacenvaentity.LevelAdmin
-
-	isOnline := func() bool {
-		if !context.IsRemote {
-			return true
-		}
-		return appDeps.Client.IsReachable()
-	}
+	isWriter := context.SelectedSot.Auth.Level.AllowsWrite()
 
 	loadAccessGroups := func(refresh bool) ([]tacenvaentity.AccessGroup, error) {
 		return vaultService.AllAccessGroup(refresh)
@@ -109,7 +93,7 @@ func New(
 
 	updateActionStates := func() {
 		currentBusy, currentLoading := getOperationState()
-		actionsEnabled := isOnline() && !currentBusy && !currentLoading
+		actionsEnabled := !currentBusy && !currentLoading
 
 		if syncButton != nil {
 			if actionsEnabled && needSyncState {
@@ -189,10 +173,6 @@ func New(
 		operation func() error,
 		onSuccess func(),
 	) {
-		if !isOnline() {
-			return
-		}
-
 		stateMu.Lock()
 		if busy || listLoading {
 			stateMu.Unlock()
@@ -224,7 +204,7 @@ func New(
 			theme.ViewRefreshIcon(),
 			func() {
 				currentBusy, currentLoading := getOperationState()
-				if !isOnline() || currentBusy || currentLoading {
+				if currentBusy || currentLoading {
 					return
 				}
 
@@ -254,7 +234,7 @@ func New(
 		onSave func(*tacpassentity.Vault, []string),
 	) {
 		currentBusy, currentLoading := getOperationState()
-		if !isOnline() || currentBusy || currentLoading {
+		if currentBusy || currentLoading {
 			return
 		}
 
@@ -262,10 +242,6 @@ func New(
 			groups, err := loadAccessGroups(false)
 
 			fyne.Do(func() {
-				if !isOnline() {
-					return
-				}
-
 				if err != nil {
 					dialog.ShowError(err, window)
 					return
@@ -277,7 +253,6 @@ func New(
 					context.SelectedSot.AccessGroup.ID,
 					groups,
 					loadAccessGroups,
-					isOnline,
 					onSave,
 				)
 			})
@@ -346,7 +321,7 @@ func New(
 			deleteButton := actions.Objects[1].(*widget.Button)
 
 			currentBusy, currentLoading := getOperationState()
-			actionsEnabled := isOnline() && !currentBusy && !currentLoading
+			actionsEnabled := !currentBusy && !currentLoading
 
 			if actionsEnabled {
 				updateButton.Enable()
@@ -358,18 +333,13 @@ func New(
 
 			updateButton.OnTapped = func() {
 				currentBusy, currentLoading := getOperationState()
-				if !isOnline() || currentBusy || currentLoading {
+				if currentBusy || currentLoading {
 					return
 				}
 
 				selectedVault := selected
 
 				openVaultForm(&selectedVault, func(updated *tacpassentity.Vault, groupIDs []string) {
-					if !isOnline() {
-						dialog.ShowInformation("Offline", "Koneksi terputus. Perubahan tidak disimpan.", window)
-						return
-					}
-
 					updated.GroupIDs = groupIDs
 
 					runOperation(
@@ -387,7 +357,7 @@ func New(
 
 			deleteButton.OnTapped = func() {
 				currentBusy, currentLoading := getOperationState()
-				if !isOnline() || currentBusy || currentLoading {
+				if currentBusy || currentLoading {
 					return
 				}
 
@@ -400,7 +370,7 @@ func New(
 						}
 
 						currentBusy, currentLoading := getOperationState()
-						if !isOnline() || currentBusy || currentLoading {
+						if currentBusy || currentLoading {
 							dialog.ShowInformation("Offline", "Koneksi tidak tersedia. Penghapusan dibatalkan.", window)
 							return
 						}
@@ -428,16 +398,11 @@ func New(
 			theme.ContentAddIcon(),
 			func() {
 				currentBusy, currentLoading := getOperationState()
-				if !isOnline() || currentBusy || currentLoading {
+				if currentBusy || currentLoading {
 					return
 				}
 
 				openVaultForm(nil, func(newVault *tacpassentity.Vault, groupIDs []string) {
-					if !isOnline() {
-						dialog.ShowInformation("Offline", "Koneksi terputus. Vault tidak dibuat.", window)
-						return
-					}
-
 					runOperation(
 						"Creating Vault...",
 						func() error {
@@ -553,25 +518,6 @@ func New(
 		})
 	}()
 
-	if context.IsRemote {
-		go func() {
-			wasOnline := isOnline()
-
-			for {
-				time.Sleep(5 * time.Second)
-
-				online := isOnline()
-				if online && !wasOnline {
-					fyne.Do(func() {
-						reload()
-					})
-				}
-
-				wasOnline = online
-			}
-		}()
-	}
-
 	return &Screen{Content: content}
 }
 
@@ -581,7 +527,6 @@ func showForm(
 	userGroupID string,
 	groups []tacenvaentity.AccessGroup,
 	loadGroups func(bool) ([]tacenvaentity.AccessGroup, error),
-	isOnline func() bool,
 	onSave func(*tacpassentity.Vault, []string),
 ) {
 	isEdit := selectedVault != nil
@@ -686,22 +631,12 @@ func showForm(
 	refreshButton := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), nil)
 
 	refreshButton.OnTapped = func() {
-		if !isOnline() {
-			dialog.ShowInformation("Offline", "Koneksi tidak tersedia.", window)
-			return
-		}
-
 		refreshButton.Disable()
 
 		go func() {
 			updatedGroups, err := loadGroups(true)
 
 			fyne.Do(func() {
-				if !isOnline() {
-					refreshButton.Disable()
-					return
-				}
-
 				refreshButton.Enable()
 
 				if err != nil {
@@ -746,11 +681,6 @@ func showForm(
 		formContainer,
 		func(ok bool) {
 			if !ok {
-				return
-			}
-
-			if !isOnline() {
-				dialog.ShowInformation("Offline", "Koneksi terputus. Perubahan tidak disimpan.", window)
 				return
 			}
 

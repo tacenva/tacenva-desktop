@@ -136,10 +136,8 @@ func New(
 					},
 				},
 			)
-
 			if nodeContext.SelectedSot.Auth.Status != tacenvaentity.UserStatusApproved {
-				err = sotService.CheckStatus(selectedSot)
-				if err != nil {
+				if err := sotService.CheckStatus(selectedSot); err != nil {
 					return nil, err
 				}
 
@@ -496,47 +494,47 @@ func New(
 		)
 
 		previousContent := window.Content()
-		window.SetContent(loadingContainer)
+
 		list.Unselect(id)
 
-		// Temporary untuk testing trust ulang.
-		// if err := sotService.ResetTLSFingerprint(&selectedSot); err != nil {
-		// 	dialog.ShowError(err, window)
-		// 	list.Unselect(id)
-		// 	return
-		// }
+		// Tampilkan loading terlebih dahulu.
+		window.SetContent(loadingContainer)
 
-		nodeContent, err := openNode(
-			&selectedSot,
-			masterKey,
-			func() {
-				fyne.Do(func() {
-					window.SetContent(content)
+		// Proses pembukaan node dijalankan di background.
+		go func() {
+			nodeContent, err := openNode(
+				&selectedSot,
+				masterKey,
+				func() {
+					fyne.Do(func() {
+						window.SetContent(content)
 
-					appDeps.Client.ClearToken()
-					appDeps.Client.ClearTLS(selectedSot.Address)
+						appDeps.Client.ClearToken()
+						appDeps.Client.ClearTLS(selectedSot.Address)
 
-					reload()
-				})
-			},
-		)
+						reload()
+					})
+				},
+			)
 
-		if err != nil {
-			loading.Stop()
-			window.SetContent(previousContent)
+			fyne.Do(func() {
+				// Abaikan hasil jika tampilan loading sudah diganti.
+				if window.Content() != loadingContainer {
+					loading.Stop()
+					return
+				}
 
-			dialog.ShowError(err, window)
-			return
-		}
+				loading.Stop()
 
-		fyne.Do(func() {
-			if window.Content() != loadingContainer {
-				return
-			}
+				if err != nil {
+					window.SetContent(previousContent)
+					dialog.ShowError(err, window)
+					return
+				}
 
-			loading.Stop()
-			window.SetContent(nodeContent)
-		})
+				window.SetContent(nodeContent)
+			})
+		}()
 	}
 
 	return screen

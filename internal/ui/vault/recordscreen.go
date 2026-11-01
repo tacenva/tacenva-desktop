@@ -40,13 +40,6 @@ func NewRecordScreen(
 	vaultService *vaultServicePackage.Service,
 	isWriter bool,
 ) *RecordScreen {
-	isOnline := func() bool {
-		if !context.IsRemote {
-			return true
-		}
-		return appDeps.Client.IsReachable()
-	}
-
 	var searchTimer *time.Timer
 
 	search := widget.NewEntry()
@@ -118,11 +111,10 @@ func NewRecordScreen(
 	}
 
 	updateActionStates := func() {
-		online := isOnline()
 		working := isBusy() || isListLoading()
 
 		if syncButton != nil {
-			if online && !working && needSyncState {
+			if !working && needSyncState {
 				syncButton.Enable()
 			} else {
 				syncButton.Disable()
@@ -130,7 +122,7 @@ func NewRecordScreen(
 		}
 
 		if newEntryButton != nil {
-			if online && !working && isWriter {
+			if !working && isWriter {
 				newEntryButton.Enable()
 			} else {
 				newEntryButton.Disable()
@@ -218,15 +210,6 @@ func NewRecordScreen(
 		operation func() error,
 		onSuccess func(),
 	) {
-		if !isOnline() {
-			dialog.ShowInformation(
-				"Offline",
-				"Koneksi tidak tersedia.",
-				window,
-			)
-			return
-		}
-
 		stateMu.Lock()
 		if busy || listLoading {
 			stateMu.Unlock()
@@ -260,7 +243,7 @@ func NewRecordScreen(
 		"Sync",
 		theme.ViewRefreshIcon(),
 		func() {
-			if !isOnline() || isBusy() || isListLoading() {
+			if isBusy() || isListLoading() {
 				return
 			}
 
@@ -286,14 +269,13 @@ func NewRecordScreen(
 			"New",
 			theme.ContentAddIcon(),
 			func() {
-				if !isOnline() || isBusy() || isListLoading() {
+				if isBusy() || isListLoading() {
 					return
 				}
 
 				showRecordForm(
 					window,
 					nil,
-					isOnline,
 					func(newRecord *tacpassentity.VaultRecord) {
 						runOperation(
 							"Creating Record...",
@@ -526,9 +508,7 @@ func NewRecordScreen(
 				return
 			}
 
-			actionsEnabled := isOnline() &&
-				!isBusy() &&
-				!isListLoading()
+			actionsEnabled := !isBusy() && !isListLoading()
 
 			if actionsEnabled {
 				updateButton.Enable()
@@ -539,7 +519,7 @@ func NewRecordScreen(
 			}
 
 			updateButton.OnTapped = func() {
-				if !isOnline() || isBusy() || isListLoading() {
+				if isBusy() || isListLoading() {
 					return
 				}
 
@@ -548,7 +528,6 @@ func NewRecordScreen(
 				showRecordForm(
 					window,
 					&selectedRecord,
-					isOnline,
 					func(updated *tacpassentity.VaultRecord) {
 						runOperation(
 							"Saving Record...",
@@ -573,7 +552,7 @@ func NewRecordScreen(
 			}
 
 			deleteButton.OnTapped = func() {
-				if !isOnline() || isBusy() || isListLoading() {
+				if isBusy() || isListLoading() {
 					return
 				}
 
@@ -586,7 +565,7 @@ func NewRecordScreen(
 							return
 						}
 
-						if !isOnline() || isBusy() || isListLoading() {
+						if isBusy() || isListLoading() {
 							dialog.ShowInformation(
 								"Offline",
 								"Koneksi tidak tersedia. Penghapusan dibatalkan.",
@@ -707,30 +686,6 @@ func NewRecordScreen(
 		})
 	}()
 
-	if context.IsRemote {
-		go func() {
-			wasOnline := isOnline()
-
-			for {
-				time.Sleep(5 * time.Second)
-
-				online := isOnline()
-
-				fyne.Do(func() {
-					updateActionStates()
-				})
-
-				if online && !wasOnline {
-					fyne.Do(func() {
-						reload()
-					})
-				}
-
-				wasOnline = online
-			}
-		}()
-	}
-
 	return &RecordScreen{
 		Content: content,
 	}
@@ -739,7 +694,6 @@ func NewRecordScreen(
 func showRecordForm(
 	window fyne.Window,
 	selectedRecord *tacpassentity.VaultRecord,
-	isOnline func() bool,
 	onSave func(record *tacpassentity.VaultRecord),
 ) {
 	isEdit := selectedRecord != nil
@@ -808,15 +762,6 @@ func showRecordForm(
 		formContainer,
 		func(ok bool) {
 			if !ok {
-				return
-			}
-
-			if isOnline == nil || !isOnline() {
-				dialog.ShowInformation(
-					"Offline",
-					"Koneksi terputus. Perubahan tidak disimpan.",
-					window,
-				)
 				return
 			}
 
