@@ -32,7 +32,6 @@ func Run(dev bool) {
 		appDeps.SqliteDB,
 		appDeps.AppDB,
 		appDeps.Config.Server.Hostname,
-		appDeps.Config.VaultDir(),
 	)
 
 	sotService := sourceoftruth.NewService(

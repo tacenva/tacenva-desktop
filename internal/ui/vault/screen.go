@@ -33,15 +33,14 @@ func New(
 	coreService *coreApp.Services,
 	sotService *sourceoftruth.Service,
 ) *Screen {
-	vaultDir := appDeps.Config.VaultDir()
-	if context.IsRemote {
-		err := coreService.Vault.Replica.SetConfig(vaultDir, masterKey)
-		if err != nil {
-			return nil
-		}
-	} else {
-		coreService.Vault.Sot.SetConfig(vaultDir)
-	}
+	// if context.IsRemote {
+	// 	err := coreService.Vault.Replica.SetConfig(vaultDir, masterKey)
+	// 	if err != nil {
+	// 		return nil
+	// 	}
+	// } else {
+	// 	coreService.Vault.Sot.SetConfig(vaultDir)
+	// }
 	vaultService := vaultServicePackage.NewService(
 		appDeps,
 		context,

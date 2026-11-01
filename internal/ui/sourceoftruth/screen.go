@@ -156,6 +156,20 @@ func New(
 			nodeContext.AuthorizedUser = authorizedUser
 		}
 
+		vaultDir := appDeps.Config.Path(
+			config.NodeDirName,
+			selectedSot.ID,
+			"vault",
+		)
+		if nodeContext.IsRemote {
+			err := coreServices.Vault.Replica.SetConfig(vaultDir, masterKey)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			coreServices.Vault.Sot.SetConfig(vaultDir)
+		}
+
 		nodeScreen := uiapp.New(
 			window,
 			appDeps,
@@ -676,7 +690,7 @@ func showDeleteConfirm(
 ) {
 	dialog.ShowConfirm(
 		"Delete Source of Truth",
-		"Source of Truth \""+hostname+"\" akan dihapus. Lanjutkan?",
+		"Source of Truth \""+hostname+"\" will be deleted. Do you want to continue?",
 		func(ok bool) {
 			if !ok {
 				return
