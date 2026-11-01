@@ -1,6 +1,10 @@
 package sourceoftruth
 
 import (
+	"errors"
+	"fmt"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -9,26 +13,47 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/tacenva/database"
-	"github.com/tacenva/tacenva-desktop/internal/ui/app"
-	rCoreApp "github.com/tacenva/tacenva-services/app"
+	"github.com/tacenva/tacenva-core/config"
+	tacenvaentity "github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
+	"github.com/tacenva/tacenva-desktop/internal/ui/discovery"
+	"github.com/tacenva/tacenva-desktop/internal/util"
+	"github.com/tacenva/tacenva-services/api"
+	tacenvaserviceapp "github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
 	"github.com/tacenva/tacenva-services/entity"
-	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/config"
-	"github.com/tacenva/tacpass-core/util/keyring"
+	tacpassapp "github.com/tacenva/tacpass-core/app"
+
+	uiapp "github.com/tacenva/tacenva-desktop/internal/ui/app"
+	replicaCore "github.com/tacenva/tacenva-services/app"
 )
+
+type OpenNodeFunc func(
+	selectedSot *entity.SourceOfTruth,
+	masterKey string,
+	onBack func(),
+) fyne.CanvasObject
 
 type Screen struct {
 	Content    fyne.CanvasObject
 	sotService *sourceoftruth.Service
+
+	list      *widget.List
+	newButton *widget.Button
+
+	discoveryState *discovery.State
+
+	discoveryStatus  *widget.Label
+	discoveryLoading *widget.ProgressBarInfinite
 }
 
 func New(
 	window fyne.Window,
-	appDeps *rCoreApp.Deps,
+	appDeps *tacenvaserviceapp.Deps,
 	masterKey string,
-	coreServices *coreApp.Services,
+	coreServices *tacpassapp.Services,
 	sotService *sourceoftruth.Service,
+	discoveryState *discovery.State,
 ) *Screen {
 	sotList, err := sotService.List()
 	if err != nil {
@@ -43,9 +68,7 @@ func New(
 		},
 	)
 
-	subtitle := widget.NewLabel(
-		"Choose node",
-	)
+	subtitle := widget.NewLabel("Choose node")
 
 	headerContent := container.NewVBox(
 		title,
@@ -53,11 +76,112 @@ func New(
 	)
 
 	header := container.New(
-		layout.NewCustomPaddedLayout(0, 0, 24, 24),
+		layout.NewCustomPaddedLayout(
+			0,
+			0,
+			24,
+			24,
+		),
 		headerContent,
 	)
 
 	var list *widget.List
+
+	reload := func() {
+		updatedList, err := sotService.List()
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+
+		sotList = updatedList
+		list.Refresh()
+	}
+
+	openNode := func(
+		selectedSot *entity.SourceOfTruth,
+		masterKey string,
+		onBack func(),
+	) (fyne.CanvasObject, error) {
+		nodeDBDir := appDeps.Config.Path(
+			config.NodeDirName,
+			selectedSot.ID,
+			"vault",
+		)
+
+		nodeContext := &replicaCore.Context{
+			SelectedSot: selectedSot,
+			NodeDB:      database.New(nodeDBDir),
+			IsRemote:    selectedSot.Address != "localhost",
+		}
+
+		if nodeContext.IsRemote {
+			appDeps.Client.SetToken(
+				nodeContext.SelectedSot.Auth.Token,
+			)
+
+			appDeps.Client.ConfigureTLS(
+				nodeContext.SelectedSot.Address,
+				api.TLSConfig{
+					Fingerprint: *nodeContext.SelectedSot.TLSFingerprint,
+
+					OnFirstTrust: func(
+						fingerprint string,
+					) error {
+						nodeContext.SelectedSot.TLSFingerprint = &fingerprint
+
+						return sotService.Update(
+							nodeContext.SelectedSot,
+						)
+					},
+				},
+			)
+			if nodeContext.SelectedSot.Auth.Status != tacenvaentity.UserStatusApproved {
+				if err := sotService.CheckStatus(selectedSot); err != nil {
+					return nil, err
+				}
+
+				if selectedSot.Auth.Status != tacenvaentity.UserStatusApproved {
+					return nil, errors.New("Status is not approved yet")
+				}
+			}
+			nodeContext.AuthorizedUser = nil
+		} else {
+			authorizedUser, err := coreServices.Auth.GetUserData(nodeContext.SelectedSot.Auth.Token)
+			if err != nil {
+				return nil, err
+			}
+			nodeContext.AuthorizedUser = authorizedUser
+		}
+
+		vaultDir := appDeps.Config.Path(
+			config.NodeDirName,
+			selectedSot.ID,
+			"vault",
+		)
+		if nodeContext.IsRemote {
+			err := coreServices.Vault.Replica.SetConfig(vaultDir, masterKey)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			coreServices.Vault.Sot.SetConfig(vaultDir)
+		}
+
+		nodeScreen := uiapp.New(
+			window,
+			appDeps,
+			nodeContext,
+			masterKey,
+			coreServices,
+			sotService,
+
+			onBack,
+		)
+
+		return nodeScreen.Content, nil
+	}
+
 	list = widget.NewList(
 		func() int {
 			return len(sotList)
@@ -141,31 +265,48 @@ func New(
 			name.SetText(selectedSot.Hostname)
 			address.SetText(selectedSot.Address)
 
+			if discoveryState.Done() {
+				editButton.Enable()
+				deleteButton.Enable()
+			} else {
+				editButton.Disable()
+				deleteButton.Disable()
+			}
+
 			editButton.OnTapped = func() {
+				if !discoveryState.Done() {
+					return
+				}
+
 				showForm(
 					window,
 					&selectedSot,
 					func(updatedSot *entity.SourceOfTruth) {
-						err := sotService.Update(updatedSot)
-						if err != nil {
+						if err := sotService.Update(updatedSot); err != nil {
 							dialog.ShowError(err, window)
 							return
 						}
 
-						sotList[id] = *updatedSot
-						list.RefreshItem(id)
+						reload()
 					},
 				)
 			}
 
 			deleteButton.OnTapped = func() {
+				if !discoveryState.Done() {
+					return
+				}
+
 				showDeleteConfirm(
 					window,
 					selectedSot.Hostname,
 					func() {
-						sotService.Del(&selectedSot)
-						sotList = append(sotList[:id], sotList[id+1:]...)
-						list.Refresh()
+						if err := sotService.Delete(&selectedSot); err != nil {
+							dialog.ShowError(err, window)
+							return
+						}
+
+						reload()
 					},
 				)
 			}
@@ -173,7 +314,12 @@ func New(
 	)
 
 	listContent := container.New(
-		layout.NewCustomPaddedLayout(0, 0, 24, 24),
+		layout.NewCustomPaddedLayout(
+			0,
+			0,
+			24,
+			24,
+		),
 		list,
 	)
 
@@ -181,27 +327,34 @@ func New(
 		"New",
 		theme.ContentAddIcon(),
 		func() {
+			if !discoveryState.Done() {
+				return
+			}
+
 			showForm(
 				window,
 				nil,
 				func(newSot *entity.SourceOfTruth) {
-					sotId, err := sotService.Create(
+					_, err := sotService.Create(
 						newSot.Hostname,
 						newSot.Address,
-						newSot.KeyPair,
+						newSot.Auth.KeyPairOfAccessUnit,
 						newSot.SyncMode,
 					)
 					if err != nil {
 						dialog.ShowError(err, window)
 						return
 					}
-					newSot.ID = sotId
-					sotList = append(sotList, *newSot)
-					list.Refresh()
+
+					reload()
 				},
 			)
 		},
 	)
+
+	if !discoveryState.Done() {
+		newButton.Disable()
+	}
 
 	newButtonContainer := container.NewGridWrap(
 		fyne.NewSize(90, 36),
@@ -214,64 +367,177 @@ func New(
 	)
 
 	actions := container.New(
-		layout.NewCustomPaddedLayout(0, 0, 24, 24),
+		layout.NewCustomPaddedLayout(
+			0,
+			0,
+			24,
+			24,
+		),
 		actionsContent,
+	)
+
+	discoveryStatus := widget.NewLabel(
+		"Discovering Source of Truth...",
+	)
+
+	discoveryLoading := widget.NewProgressBarInfinite()
+
+	discoveryIndicator := container.NewHBox(
+		discoveryLoading,
+		discoveryStatus,
+	)
+
+	discoveryBar := container.New(
+		layout.NewCustomPaddedLayout(
+			8,
+			8,
+			12,
+			12,
+		),
+		discoveryIndicator,
+	)
+
+	discoveryBarRight := container.NewHBox(
+		layout.NewSpacer(),
+		discoveryBar,
+	)
+
+	footer := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		nil,
+		actions,
+	)
+
+	footerRight := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		discoveryBarRight,
+		footer,
 	)
 
 	content := container.NewBorder(
 		header,
-		actions,
+		footerRight,
 		nil,
 		nil,
 		listContent,
 	)
 
+	screen := &Screen{
+		Content:          content,
+		sotService:       sotService,
+		list:             list,
+		newButton:        newButton,
+		discoveryState:   discoveryState,
+		discoveryStatus:  discoveryStatus,
+		discoveryLoading: discoveryLoading,
+	}
+
+	updateDiscoveryUI := func() {
+		screen.discoveryLoading.Hide()
+
+		if discoveryState.Error() != nil {
+			screen.discoveryStatus.SetText(
+				"Discovery failed",
+			)
+		} else {
+			screen.discoveryStatus.SetText(
+				fmt.Sprintf(
+					"Discovery complete · %d server(s) found",
+					discoveryState.Count(),
+				),
+			)
+		}
+
+		screen.newButton.Enable()
+
+		// Refresh row buttons agar status enabled/disabled diperbarui.
+		screen.list.Refresh()
+		screen.Content.Refresh()
+	}
+
+	if discoveryState.Done() {
+		updateDiscoveryUI()
+	} else {
+		discoveryState.OnDone(func() {
+			fyne.Do(updateDiscoveryUI)
+		})
+	}
+
 	list.OnSelected = func(id widget.ListItemID) {
+		if !discoveryState.Done() {
+			list.Unselect(id)
+			return
+		}
+
 		if id < 0 || id >= len(sotList) {
 			return
 		}
 
 		selectedSot := sotList[id]
 
-		nodeDBDir := appDeps.Config.Path(
-			config.NodeDirName,
-			selectedSot.ID,
-			"vault",
+		loading := widget.NewProgressBarInfinite()
+		status := widget.NewLabel("Opening Source of Truth...")
+
+		loadingContainer := container.NewVBox(
+			layout.NewSpacer(),
+			container.NewCenter(
+				container.NewVBox(
+					container.NewCenter(loading),
+					container.NewCenter(status),
+				),
+			),
+			layout.NewSpacer(),
 		)
 
-		appScreen := app.New(
-			window,
-			appDeps,
-			&rCoreApp.Context{
-				SelectedSoT: &selectedSot,
-				NodeDB:      database.New(nodeDBDir),
-				IsRemote:    selectedSot.Address != "localhost",
-			},
-			masterKey,
-			coreServices,
-			sotService,
-			func() {
-				fyne.Do(func() {
-					window.SetContent(content)
+		previousContent := window.Content()
 
-					appDeps.Client.ClearToken()
-					appDeps.Client.ClearTLS(selectedSot.Address)
+		list.Unselect(id)
 
-					list.Unselect(id)
-				})
-			},
-		)
+		// Tampilkan loading terlebih dahulu.
+		window.SetContent(loadingContainer)
 
-		fyne.Do(func() {
-			window.SetContent(appScreen.Content)
-			list.Unselect(id)
-		})
+		// Proses pembukaan node dijalankan di background.
+		go func() {
+			nodeContent, err := openNode(
+				&selectedSot,
+				masterKey,
+				func() {
+					fyne.Do(func() {
+						window.SetContent(content)
+
+						appDeps.Client.ClearToken()
+						appDeps.Client.ClearTLS(selectedSot.Address)
+
+						reload()
+					})
+				},
+			)
+
+			fyne.Do(func() {
+				// Abaikan hasil jika tampilan loading sudah diganti.
+				if window.Content() != loadingContainer {
+					loading.Stop()
+					return
+				}
+
+				loading.Stop()
+
+				if err != nil {
+					window.SetContent(previousContent)
+					dialog.ShowError(err, window)
+					return
+				}
+
+				window.SetContent(nodeContent)
+			})
+		}()
 	}
 
-	return &Screen{
-		Content:    content,
-		sotService: sotService,
-	}
+	return screen
 }
 
 func showForm(
@@ -295,13 +561,24 @@ func showForm(
 	addressEntry.SetText(sot.Address)
 	addressEntry.SetPlaceHolder("Source of Truth address")
 
-	publicKeyEntry := widget.NewMultiLineEntry()
-	publicKeyEntry.SetText(sot.KeyPair.PublicKey)
-	publicKeyEntry.SetMinRowsVisible(4)
+	secretKeyEntry := widget.NewMultiLineEntry()
+	secretKeyEntry.SetPlaceHolder("Paste secret key")
+	secretKeyEntry.SetMinRowsVisible(4)
+	secretKeyEntry.Wrapping = fyne.TextWrapBreak
 
-	privateKeyEntry := widget.NewMultiLineEntry()
-	privateKeyEntry.SetText(sot.KeyPair.PrivateKey)
-	privateKeyEntry.SetMinRowsVisible(4)
+	// Show encoded.
+	if sot.Auth != nil && (sot.Auth.KeyPairOfAccessUnit.PublicKey != "" || sot.Auth.KeyPairOfAccessUnit.PrivateKey != "") {
+		secret, err := util.EncodeSecretKey(
+			sot.Auth.KeyPairOfAccessUnit.PublicKey,
+			sot.Auth.KeyPairOfAccessUnit.PrivateKey,
+		)
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+
+		secretKeyEntry.SetText(secret)
+	}
 
 	syncModeSelect := widget.NewSelect(
 		[]string{
@@ -312,13 +589,9 @@ func showForm(
 	)
 
 	if sot.SyncMode != "" {
-		syncModeSelect.SetSelected(
-			string(sot.SyncMode),
-		)
+		syncModeSelect.SetSelected(string(sot.SyncMode))
 	} else {
-		syncModeSelect.SetSelected(
-			string(entity.SyncModeManual),
-		)
+		syncModeSelect.SetSelected(string(entity.SyncModeManual))
 	}
 
 	formItems := []*widget.FormItem{
@@ -331,16 +604,11 @@ func showForm(
 			addressEntry,
 		),
 		widget.NewFormItem(
-			"Public Key",
-			publicKeyEntry,
-		),
-		widget.NewFormItem(
-			"Private Key",
-			privateKeyEntry,
+			"Secret Key",
+			secretKeyEntry,
 		),
 	}
 
-	// Sync Mode hanya ditampilkan untuk remote Source of Truth.
 	if addressEntry.Text != "localhost" {
 		formItems = append(
 			formItems,
@@ -351,9 +619,7 @@ func showForm(
 		)
 	}
 
-	form := widget.NewForm(
-		formItems...,
-	)
+	form := widget.NewForm(formItems...)
 
 	formContainer := container.NewGridWrap(
 		fyne.NewSize(650, 420),
@@ -376,8 +642,7 @@ func showForm(
 				return
 			}
 
-			hostname := hostnameEntry.Text
-			address := addressEntry.Text
+			address := strings.TrimSpace(addressEntry.Text)
 
 			if address == "" {
 				dialog.ShowInformation(
@@ -385,16 +650,23 @@ func showForm(
 					"Address wajib diisi.",
 					window,
 				)
-
 				return
 			}
 
-			sot.Hostname = hostname
-			sot.Address = address
+			pair, err := util.DecodeSecretKey(secretKeyEntry.Text)
+			if err != nil {
+				dialog.ShowError(err, window)
+				return
+			}
 
-			sot.KeyPair = *keyring.FromKeys(
-				publicKeyEntry.Text,
-				privateKeyEntry.Text,
+			sot.Hostname = hostnameEntry.Text
+			sot.Address = address
+			if sot.Auth == nil {
+				sot.Auth = &entity.Auth{}
+			}
+			sot.Auth.KeyPairOfAccessUnit = *keyring.FromKeys(
+				pair.PublicKey,
+				pair.PrivateKey,
 			)
 
 			if address != "localhost" {
@@ -416,7 +688,7 @@ func showDeleteConfirm(
 ) {
 	dialog.ShowConfirm(
 		"Delete Source of Truth",
-		"Source of Truth \""+hostname+"\" akan dihapus. Lanjutkan?",
+		"Source of Truth \""+hostname+"\" will be deleted. Do you want to continue?",
 		func(ok bool) {
 			if !ok {
 				return

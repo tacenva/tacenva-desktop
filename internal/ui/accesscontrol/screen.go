@@ -1,24 +1,28 @@
 package accesscontrol
 
 import (
+	"errors"
+	"fmt"
 	"strings"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
+	"github.com/tacenva/tacenva-core/contract"
+	"github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
-	"github.com/tacenva/tacpass-core/entity"
 )
 
 type Screen struct {
 	Content fyne.CanvasObject
+	Reload  func()
+	window  fyne.Window
 }
 
 func New(
@@ -27,619 +31,1207 @@ func New(
 	context *app.Context,
 	coreService *coreApp.Services,
 ) *Screen {
-	acService := accesscontrol.NewService(
+	accesscontrolService := accesscontrol.NewService(
 		appDeps,
 		context,
 		coreService.AccessControl,
-		coreService.Auth,
 	)
 
-	var searchTimer *time.Timer
+	var loadingUnits bool
+	var unitRequestID uint64
 
-	search := widget.NewEntry()
-	search.SetPlaceHolder("Search permissions...")
+	groupLoadingBar := widget.NewProgressBarInfinite()
+	groupLoadingLabel := widget.NewLabel("Loading access groups...")
 
-	allACL := make([]entity.Permission, 0)
-	filteredACL := make([]entity.Permission, 0)
-
-	var entryList *widget.List
-
-	content := container.NewMax()
-
-	loadingView := loading.New(
-		"Loading access controls...",
+	groupLoadingView := container.NewCenter(
+		container.NewVBox(
+			groupLoadingBar,
+			groupLoadingLabel,
+		),
 	)
 
-	filterACL := func(
-		permissions []entity.Permission,
-		query string,
-	) []entity.Permission {
-		query = strings.ToLower(
-			strings.TrimSpace(query),
-		)
+	unitLoadingBar := widget.NewProgressBarInfinite()
+	unitLoadingLabel := widget.NewLabel("Loading access units...")
 
-		if query == "" {
-			return append(
-				[]entity.Permission(nil),
-				permissions...,
-			)
-		}
+	unitLoadingView := container.NewCenter(
+		container.NewVBox(
+			unitLoadingBar,
+			unitLoadingLabel,
+		),
+	)
 
-		filtered := make(
-			[]entity.Permission,
-			0,
-			len(permissions),
-		)
+	var groupTree []contract.AccessGroupTree
+	var units []contract.AccessUnitWithUserCount
 
-		for _, permission := range permissions {
-			name := strings.ToLower(
-				permission.Name,
-			)
+	var loadGroups func()
+	var loadUnits func(groupID string)
+	var refreshSelectedUnit func()
 
-			privilege := strings.ToLower(
-				string(permission.Privilege),
-			)
+	var selectedGroupTree *contract.AccessGroupTree
+	var navigationStack []*contract.AccessGroupTree
+	var selectedUnit *contract.AccessUnitWithUserCount
 
-			if strings.Contains(name, query) ||
-				strings.Contains(privilege, query) {
-				filtered = append(
-					filtered,
-					permission,
-				)
+	unitsByGroup := make(
+		map[string][]contract.AccessUnitWithUserCount,
+	)
+
+	var render func()
+	var selectGroup func(*contract.AccessGroupTree)
+
+	var saveAccessUnit AccessUnitSaveCallback
+	var deleteAccessUnit func(*entity.AccessUnit)
+
+	panelOpen := false
+	showingUsers := false
+
+	pageTitle := widget.NewLabelWithStyle(
+		"Access Control",
+		fyne.TextAlignLeading,
+		fyne.TextStyle{Bold: true},
+	)
+
+	pageSubtitle := widget.NewLabel(
+		"Manage access groups and their permissions.",
+	)
+
+	groupContainer := container.NewVBox()
+	unitContainer := container.NewVBox()
+	contentBody := container.NewVBox()
+
+	panelContainer := container.NewMax()
+	root := container.NewMax()
+
+	backButton := widget.NewButtonWithIcon(
+		"Back",
+		theme.NavigateBackIcon(),
+		func() {
+			if showingUsers {
+				showingUsers = false
+				selectedUnit = nil
+				render()
+				return
 			}
+
+			if len(navigationStack) <= 1 {
+				return
+			}
+
+			navigationStack = navigationStack[:len(navigationStack)-1]
+			selectedGroupTree = navigationStack[len(navigationStack)-1]
+
+			// Sinkronkan selected group dengan service.
+			accesscontrolService.SetSelectedGroup(&selectedGroupTree.Group)
+
+			units = unitsByGroup[selectedGroupTree.Group.ID]
+
+			render()
+		},
+	)
+
+	reloadButton := widget.NewButtonWithIcon(
+		"Reload",
+		theme.ViewRefreshIcon(),
+		func() {
+			loadGroups()
+		},
+	)
+
+	header := container.NewVBox(
+		container.NewBorder(
+			nil,
+			nil,
+			container.NewHBox(backButton, pageTitle),
+			reloadButton,
+			nil,
+		),
+		pageSubtitle,
+	)
+
+	normalMainContent := container.NewPadded(
+		container.NewScroll(
+			container.NewVBox(
+				header,
+				widget.NewSeparator(),
+				contentBody,
+			),
+		),
+	)
+
+	var mainContent fyne.CanvasObject = normalMainContent
+
+	updateLayout := func() {
+		if panelOpen && !showingUsers {
+			split := container.NewHSplit(
+				mainContent,
+				panelContainer,
+			)
+			split.SetOffset(0.68)
+
+			root.Objects = []fyne.CanvasObject{split}
+		} else {
+			root.Objects = []fyne.CanvasObject{mainContent}
 		}
 
-		return filtered
+		root.Refresh()
 	}
 
-	reload := func() {
-		go func() {
-			updatedACL, err := acService.List()
+	openPanel := func() {
+		panelOpen = true
+		render()
+	}
 
-			fyne.Do(func() {
-				if err != nil {
-					dialog.ShowError(
-						err,
-						window,
-					)
+	showEditPlaceholder := func(group *entity.AccessGroup) {
+		groupNameEntry := widget.NewEntry()
+		groupNameEntry.SetText(group.Name)
+		groupNameEntry.SetPlaceHolder("Enter group name")
 
+		form := dialog.NewForm(
+			"Edit Access Group",
+			"Save",
+			"Cancel",
+			[]*widget.FormItem{
+				widget.NewFormItem("Group Name", groupNameEntry),
+			},
+			func(confirmed bool) {
+				if !confirmed {
 					return
 				}
 
-				allACL = updatedACL
+				newName := strings.TrimSpace(groupNameEntry.Text)
+				if newName == "" {
+					dialog.ShowError(
+						errors.New("Group name cannot be empty"),
+						window,
+					)
+					return
+				}
 
-				filteredACL = filterACL(
-					allACL,
-					search.Text,
+				updatedGroup := *group
+				updatedGroup.Name = newName
+
+				runWithLoading(
+					window,
+					"Updating Access Group",
+					"Saving access group changes...",
+					func() error {
+						return accesscontrolService.UpdateGroup(
+							&updatedGroup,
+						)
+					},
+					func() {
+						group.Name = newName
+
+						dialog.ShowInformation(
+							"Success",
+							fmt.Sprintf(
+								"Access group %q updated successfully.",
+								updatedGroup.Name,
+							),
+							window,
+						)
+
+						loadGroups()
+					},
+				)
+			},
+			window,
+		)
+
+		form.Resize(fyne.NewSize(400, 180))
+		form.Show()
+	}
+
+	showDeletePlaceholder := func(group *entity.AccessGroup) {
+		dialog.ShowConfirm(
+			"Delete Subgroup",
+			fmt.Sprintf(
+				"Are you sure you want to delete subgroup %q?",
+				group.Name,
+			),
+			func(confirmed bool) {
+				if !confirmed {
+					return
+				}
+
+				runWithLoading(
+					window,
+					"Deleting Access Group",
+					"Deleting access group...",
+					func() error {
+						return accesscontrolService.DeleteGroup(
+							group.ID,
+						)
+					},
+					func() {
+						dialog.ShowInformation(
+							"Success",
+							fmt.Sprintf(
+								"Subgroup %q deleted successfully.",
+								group.Name,
+							),
+							window,
+						)
+
+						loadGroups()
+					},
+				)
+			},
+			window,
+		)
+	}
+
+	showNewPlaceholder := func() {
+		groupNameEntry := widget.NewEntry()
+		groupNameEntry.SetPlaceHolder("Enter access group name")
+
+		parentAccessCheck := widget.NewCheck(
+			"Allow access to parent group",
+			nil,
+		)
+		parentAccessCheck.SetChecked(true)
+
+		adminNameEntry := widget.NewEntry()
+		adminNameEntry.SetPlaceHolder("Enter admin name")
+
+		autoApproveCheck := widget.NewCheck(
+			"Automatically approve users",
+			nil,
+		)
+
+		groupSection := container.NewVBox(
+			widget.NewLabelWithStyle(
+				"Access Group",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{Bold: true},
+			),
+			widget.NewForm(
+				widget.NewFormItem("Group Name", groupNameEntry),
+			),
+			parentAccessCheck,
+		)
+
+		adminSection := container.NewVBox(
+			widget.NewLabelWithStyle(
+				"Admin Access Unit",
+				fyne.TextAlignLeading,
+				fyne.TextStyle{Bold: true},
+			),
+			widget.NewForm(
+				widget.NewFormItem("Admin Name", adminNameEntry),
+			),
+			autoApproveCheck,
+		)
+
+		content := container.NewVBox(
+			groupSection,
+			widget.NewSeparator(),
+			adminSection,
+		)
+
+		form := dialog.NewCustomConfirm(
+			"Create Access Group",
+			"Create",
+			"Cancel",
+			content,
+			func(confirmed bool) {
+				if !confirmed {
+					return
+				}
+
+				groupName := strings.TrimSpace(groupNameEntry.Text)
+				adminName := strings.TrimSpace(adminNameEntry.Text)
+
+				if groupName == "" {
+					dialog.ShowError(
+						fmt.Errorf("group name is required"),
+						window,
+					)
+					return
+				}
+
+				if adminName == "" {
+					dialog.ShowError(
+						fmt.Errorf("admin name is required"),
+						window,
+					)
+					return
+				}
+
+				newGroup := &entity.AccessGroup{
+					Name: groupName,
+				}
+
+				adminUnit := &entity.AccessUnit{
+					Name:        adminName,
+					Level:       entity.LevelAdmin,
+					AutoApprove: autoApproveCheck.Checked,
+				}
+
+				parentAccess := parentAccessCheck.Checked
+
+				go func() {
+					runWithLoading(
+						window,
+						"Creating Access Group",
+						"Creating access group, please wait...",
+						func() error {
+							return accesscontrolService.CreateGroup(
+								newGroup,
+								adminUnit,
+								parentAccess,
+							)
+						},
+						func() {
+							fyne.Do(func() {
+								dialog.ShowInformation(
+									"Success",
+									fmt.Sprintf(
+										"Access group %q created successfully.",
+										groupName,
+									),
+									window,
+								)
+
+								loadGroups()
+							})
+						},
+					)
+
+				}()
+			},
+			window,
+		)
+
+		form.Resize(fyne.NewSize(440, 400))
+		form.Show()
+	}
+
+	showUnitUsers := func(unit contract.AccessUnitWithUserCount) {
+		currentUnit := unit
+
+		selectedUnit = &currentUnit
+		showingUsers = true
+		panelOpen = false
+
+		render()
+	}
+
+	// =========================================================
+	// SAVE ACCESS UNIT
+	// =========================================================
+
+	saveAccessUnit = func(
+		accessUnit *entity.AccessUnit,
+		onSuccess func(),
+		onError func(error),
+	) {
+		if selectedGroupTree == nil {
+			onError(fmt.Errorf("select an access group first"))
+			return
+		}
+
+		if accessUnit == nil {
+			onError(fmt.Errorf("access unit is invalid"))
+			return
+		}
+
+		groupID := selectedGroupTree.Group.ID
+		isCreate := accessUnit.ID == ""
+
+		unitCopy := *accessUnit
+
+		if isCreate {
+			unitCopy.GroupID = groupID
+			unitCopy.SotID = selectedGroupTree.Group.SotID
+		}
+
+		runWithLoading(
+			window,
+			"Saving Access Unit",
+			"Saving access unit changes...",
+			func() error {
+				if isCreate {
+					return accesscontrolService.CreateUnit(&unitCopy)
+				}
+
+				return accesscontrolService.UpdateUnit(&unitCopy)
+			},
+			func() {
+				// Sinkronkan hasil ke objek form.
+				*accessUnit = unitCopy
+
+				// Update cache hanya setelah request berhasil.
+				groupUnits := unitsByGroup[groupID]
+				found := false
+
+				for i := range groupUnits {
+					if groupUnits[i].ID != unitCopy.ID {
+						continue
+					}
+
+					groupUnits[i].AccessUnit = unitCopy
+					found = true
+					break
+				}
+
+				if !found {
+					groupUnits = append(
+						groupUnits,
+						contract.AccessUnitWithUserCount{
+							AccessUnit: unitCopy,
+						},
+					)
+
+					selectedGroupTree.AccessUnitCount++
+				}
+
+				unitsByGroup[groupID] = groupUnits
+
+				if selectedGroupTree.Group.ID == groupID {
+					units = groupUnits
+				}
+
+				if selectedUnit != nil &&
+					selectedUnit.ID == unitCopy.ID {
+					selectedUnit.AccessUnit = unitCopy
+				}
+
+				render()
+
+				dialog.ShowInformation(
+					"Success",
+					"Access unit saved successfully.",
+					window,
 				)
 
-				if entryList != nil {
-					entryList.UnselectAll()
-					entryList.Refresh()
+				if onSuccess != nil {
+					onSuccess()
+				}
+			},
+		)
+	}
+
+	// =========================================================
+	// DELETE ACCESS UNIT
+	// =========================================================
+
+	deleteAccessUnit = func(au *entity.AccessUnit) {
+		if au == nil {
+			return
+		}
+
+		if selectedGroupTree == nil {
+			dialog.ShowError(
+				fmt.Errorf("select an access group first"),
+				window,
+			)
+			return
+		}
+
+		groupID := au.GroupID
+		if groupID == "" {
+			groupID = selectedGroupTree.Group.ID
+		}
+
+		runWithLoading(
+			window,
+			"Deleting Access Unit",
+			"Deleting access unit...",
+			func() error {
+				return accesscontrolService.DeleteUnit(au.ID)
+			},
+			func() {
+				groupUnits := unitsByGroup[groupID]
+
+				filteredUnits := make(
+					[]contract.AccessUnitWithUserCount,
+					0,
+					len(groupUnits),
+				)
+
+				for _, unit := range groupUnits {
+					if unit.ID == au.ID {
+						selectedGroupTree.AccessUnitCount--
+						selectedGroupTree.UserCount -= unit.UserCount
+						selectedGroupTree.PendingUserCount -= unit.PendingCount
+						continue
+					}
+
+					filteredUnits = append(filteredUnits, unit)
+				}
+
+				unitsByGroup[groupID] = filteredUnits
+
+				if selectedGroupTree.Group.ID == groupID {
+					units = filteredUnits
+				}
+
+				if selectedUnit != nil && selectedUnit.ID == au.ID {
+					selectedUnit = nil
+					showingUsers = false
+				}
+
+				render()
+
+				dialog.ShowInformation(
+					"Success",
+					fmt.Sprintf(
+						"Access unit %q deleted successfully.",
+						au.Name,
+					),
+					window,
+				)
+			},
+		)
+	}
+
+	onRevoke := func(
+		unit *entity.AccessUnit,
+		revoked bool,
+	) {
+		if unit == nil {
+			dialog.ShowError(
+				errors.New("access unit is invalid"),
+				window,
+			)
+			return
+		}
+
+		action := "Reactivating"
+		if revoked {
+			action = "Revoking"
+		}
+
+		runWithLoading(
+			window,
+			action+" Access Unit",
+			action+" access unit...",
+			func() error {
+				return accesscontrolService.SetRevokeUnit(
+					unit.ID,
+					revoked,
+				)
+			},
+			func() {
+				groupID := unit.GroupID
+				if groupID == "" && selectedGroupTree != nil {
+					groupID = selectedGroupTree.Group.ID
+				}
+
+				if groupID != "" {
+					loadUnits(groupID)
+				}
+
+				status := "is active"
+				if revoked {
+					status = "is revoked"
+				}
+
+				dialog.ShowInformation(
+					"Success",
+					fmt.Sprintf(
+						"Access unit %q "+status+" successfully.",
+						unit.Name,
+					),
+					window,
+				)
+			},
+		)
+	}
+
+	// =========================================================
+	// RENDER
+	// =========================================================
+
+	render = func() {
+		if selectedGroupTree == nil {
+			return
+		}
+
+		contentBody.RemoveAll()
+
+		if showingUsers && selectedUnit != nil {
+			backButton.Enable()
+
+			levelTag := widget.NewLabel(
+				fmt.Sprintf("Level: %s", selectedUnit.Level),
+			)
+
+			statusText := "Active"
+			if selectedUnit.Revoked {
+				statusText = "Revoked"
+			}
+
+			statusTag := widget.NewLabel(
+				fmt.Sprintf("Status: %s", statusText),
+			)
+
+			stats := container.NewGridWithColumns(
+				3,
+				newGroupStatCard(
+					"Users",
+					fmt.Sprintf("%d", selectedUnit.UserCount),
+				),
+				newGroupStatCard(
+					"Pending",
+					fmt.Sprintf("%d", selectedUnit.PendingCount),
+				),
+				newGroupStatCard(
+					"Revoked",
+					fmt.Sprintf("%d", selectedUnit.RevokedCount),
+				),
+			)
+
+			unitInfo := container.NewVBox(
+				widget.NewLabelWithStyle(
+					selectedUnit.Name,
+					fyne.TextAlignLeading,
+					fyne.TextStyle{Bold: true},
+				),
+				container.NewHBox(
+					levelTag,
+					statusTag,
+				),
+				stats,
+			)
+
+			unitInfoCard := container.NewHBox(
+				container.New(
+					layout.NewGridWrapLayout(
+						fyne.NewSize(
+							680,
+							unitInfo.MinSize().Height,
+						),
+					),
+					unitInfo,
+				),
+			)
+
+			userHeader := container.NewVBox(
+				unitInfoCard,
+				widget.NewLabelWithStyle(
+					"Users",
+					fyne.TextAlignLeading,
+					fyne.TextStyle{Bold: true},
+				),
+			)
+
+			userTable := newUserListSection(
+				window,
+				selectedUnit.Users,
+
+				// Approve user
+				func(user entity.User) {
+					showUserActionDialog(
+						window,
+						"Approve User",
+						fmt.Sprintf("Approve user %q?", user.Hostname),
+						func() {
+							runWithLoading(
+								window,
+								"Approving User",
+								"Approving user...",
+								func() error {
+									return accesscontrolService.SetApprovalUser(
+										user.ID,
+										false,
+									)
+								},
+								func() {
+									refreshSelectedUnit()
+
+									dialog.ShowInformation(
+										"Success",
+										fmt.Sprintf(
+											"User %q approved successfully.",
+											user.Hostname,
+										),
+										window,
+									)
+								},
+							)
+						},
+					)
+				},
+
+				// Revoke user
+				func(user entity.User) {
+					showUserActionDialog(
+						window,
+						"Revoke User",
+						fmt.Sprintf(
+							"Revoke access for user %q?",
+							user.Hostname,
+						),
+						func() {
+							runWithLoading(
+								window,
+								"Revoking User",
+								"Revoking user access...",
+								func() error {
+									return accesscontrolService.SetApprovalUser(
+										user.ID,
+										true,
+									)
+								},
+								func() {
+									refreshSelectedUnit()
+
+									dialog.ShowInformation(
+										"Success",
+										fmt.Sprintf(
+											"User %q revoked successfully.",
+											user.Hostname,
+										),
+										window,
+									)
+								},
+							)
+						},
+					)
+				},
+
+				// Delete user
+				func(user entity.User) {
+					runWithLoading(
+						window,
+						"Deleting User",
+						"Deleting user...",
+						func() error {
+							return accesscontrolService.DeleteUser(user.ID)
+						},
+						func() {
+							refreshSelectedUnit()
+
+							dialog.ShowInformation(
+								"Success",
+								fmt.Sprintf(
+									"User %q deleted successfully.",
+									user.Hostname,
+								),
+								window,
+							)
+						},
+					)
+				},
+			)
+
+			// Table mendapatkan seluruh ruang vertikal yang tersedia.
+			userContent := container.NewBorder(
+				userHeader,
+				nil,
+				nil,
+				nil,
+				userTable,
+			)
+
+			// Tampilan Users tidak menggunakan Scroll halaman luar.
+			mainContent = container.NewPadded(
+				container.NewBorder(
+					header,
+					nil,
+					nil,
+					nil,
+					userContent,
+				),
+			)
+
+			updateLayout()
+			return
+		}
+
+		mainContent = normalMainContent
+		groupContainer.RemoveAll()
+		groupContainer.Add(
+			newAccessGroupCard(
+				selectedGroupTree,
+				openPanel,
+				func(group *contract.AccessGroupTree) {
+					showEditPlaceholder(&group.Group)
+				},
+			),
+		)
+
+		groupContainer.Refresh()
+
+		if !loadingUnits {
+			unitContainer.Objects = []fyne.CanvasObject{
+				newAccessUnitSection(
+					units,
+					showUnitUsers,
+					saveAccessUnit,
+					deleteAccessUnit,
+					onRevoke,
+				),
+			}
+
+			unitContainer.Refresh()
+		}
+
+		if len(navigationStack) > 1 {
+			backButton.Enable()
+		} else {
+			backButton.Disable()
+		}
+
+		contentBody.Add(
+			container.NewGridWrap(
+				fyne.NewSize(1, 12),
+				widget.NewLabel(""),
+			),
+		)
+
+		contentBody.Add(groupContainer)
+
+		contentBody.Add(
+			container.NewGridWrap(
+				fyne.NewSize(1, 24),
+				widget.NewLabel(""),
+			),
+		)
+
+		contentBody.Add(unitContainer)
+
+		if panelOpen {
+			panelContainer.Objects = []fyne.CanvasObject{
+				newAccessGroupPanel(
+					selectedGroupTree,
+					func(group *contract.AccessGroupTree) {
+						selectGroup(group)
+					},
+					func(group *contract.AccessGroupTree) {
+						showEditPlaceholder(&group.Group)
+					},
+					showNewPlaceholder,
+					func(group *contract.AccessGroupTree) {
+						showDeletePlaceholder(&group.Group)
+					},
+					func() {
+						panelOpen = false
+						updateLayout()
+					},
+				),
+			}
+
+			panelContainer.Refresh()
+		}
+
+		updateLayout()
+	}
+
+	refreshSelectedUnit = func() {
+		if selectedUnit == nil {
+			return
+		}
+
+		unitID := selectedUnit.ID
+		groupID := selectedUnit.GroupID
+
+		go func() {
+			result, err := accesscontrolService.UnitList(groupID)
+
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(err, window)
+					return
+				}
+
+				units = result
+				unitsByGroup[groupID] = result
+
+				for i := range result {
+					if result[i].ID == unitID {
+						refreshedUnit := result[i]
+						selectedUnit = &refreshedUnit
+
+						render()
+						return
+					}
+				}
+
+				dialog.ShowError(
+					fmt.Errorf("access unit %q not found after refresh", unitID),
+					window,
+				)
+			})
+		}()
+	}
+
+	// =========================================================
+	// GROUP NAVIGATION
+	// =========================================================
+
+	selectGroup = func(group *contract.AccessGroupTree) {
+		if group == nil {
+			return
+		}
+
+		showingUsers = false
+		selectedUnit = nil
+
+		groupID := group.Group.ID
+
+		// Cek apakah group sudah ada di navigation stack.
+		stackIndex := -1
+
+		for i, existing := range navigationStack {
+			if existing.Group.ID == groupID {
+				stackIndex = i
+				break
+			}
+		}
+
+		// Tandai loading dan ambil data tree terbaru.
+		go func() {
+			result, err := accesscontrolService.GroupWithChildren(
+				&group.Group,
+			)
+
+			fyne.Do(func() {
+				if err != nil {
+					dialog.ShowError(err, window)
+					return
+				}
+
+				if len(result) == 0 {
+					dialog.ShowInformation(
+						"Information",
+						"No access group data found.",
+						window,
+					)
+					return
+				}
+
+				// Gunakan hasil terbaru dari GroupWithChildren.
+				selectedGroupTree = &result[0]
+
+				accesscontrolService.SetSelectedGroup(
+					&selectedGroupTree.Group,
+				)
+
+				// Update navigation stack.
+				if stackIndex >= 0 {
+					navigationStack = navigationStack[:stackIndex+1]
+					navigationStack[stackIndex] = selectedGroupTree
+				} else {
+					navigationStack = append(
+						navigationStack,
+						selectedGroupTree,
+					)
+				}
+
+				units = unitsByGroup[groupID]
+
+				render()
+
+				if _, exists := unitsByGroup[groupID]; !exists {
+					loadUnits(groupID)
 				}
 			})
 		}()
 	}
 
-	entryList = widget.NewList(
-		func() int {
-			return len(filteredACL)
-		},
-		func() fyne.CanvasObject {
-			name := widget.NewLabel("")
-			privilege := widget.NewLabel("")
+	// =========================================================
+	// LOAD GROUPS
+	// =========================================================
 
-			editButton := widget.NewButtonWithIcon(
-				"",
-				theme.DocumentCreateIcon(),
-				nil,
-			)
+	loadGroups = func() {
+		reloadButton.Disable()
 
-			deleteButton := widget.NewButtonWithIcon(
-				"",
-				theme.DeleteIcon(),
-				nil,
-			)
+		groupLoadingBar.Start()
 
-			actions := container.NewHBox(
-				editButton,
-				deleteButton,
-			)
-
-			nameCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
-				name,
-			)
-
-			privilegeCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				nil,
-				privilege,
-			)
-
-			actionCell := container.NewBorder(
-				nil,
-				nil,
-				nil,
-				actions,
-				nil,
-			)
-
-			return container.NewGridWithColumns(
-				3,
-				nameCell,
-				privilegeCell,
-				actionCell,
-			)
-		},
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(filteredACL) {
-				return
-			}
-
-			acData := filteredACL[id]
-
-			row := obj.(*fyne.Container)
-
-			nameCell := row.Objects[0].(*fyne.Container)
-			privilegeCell := row.Objects[1].(*fyne.Container)
-			actionCell := row.Objects[2].(*fyne.Container)
-
-			name := nameCell.Objects[0].(*widget.Label)
-			privilege := privilegeCell.Objects[0].(*widget.Label)
-			actions := actionCell.Objects[0].(*fyne.Container)
-
-			editButton := actions.Objects[0].(*widget.Button)
-			deleteButton := actions.Objects[1].(*widget.Button)
-
-			name.SetText(acData.Name)
-
-			privilege.SetText(
-				string(acData.Privilege),
-			)
-
-			editButton.OnTapped = func() {
-				selected := acData
-
-				showForm(
-					window,
-					&selected,
-					func(updated *entity.Permission) {
-						editButton.Disable()
-						deleteButton.Disable()
-
-						go func() {
-							var err error
-
-							if updated.Name != selected.Name {
-								err = acService.ChangeName(
-									updated.ID,
-									updated.Name,
-								)
-
-								if err != nil {
-									fyne.Do(func() {
-										editButton.Enable()
-										deleteButton.Enable()
-
-										dialog.ShowError(
-											err,
-											window,
-										)
-									})
-
-									return
-								}
-							}
-
-							if updated.Privilege != selected.Privilege {
-								err = acService.ChangePrivilege(
-									updated.ID,
-									updated.Privilege,
-								)
-
-								if err != nil {
-									fyne.Do(func() {
-										editButton.Enable()
-										deleteButton.Enable()
-
-										dialog.ShowError(
-											err,
-											window,
-										)
-									})
-
-									return
-								}
-							}
-
-							fyne.Do(func() {
-								editButton.Enable()
-								deleteButton.Enable()
-
-								dialog.ShowInformation(
-									"Success",
-									"Access control berhasil diperbarui.",
-									window,
-								)
-
-								reload()
-							})
-						}()
-					},
-				)
-			}
-
-			deleteButton.OnTapped = func() {
-				dialog.ShowConfirm(
-					"Delete Access Control",
-					"Access control \""+
-						acData.Name+
-						"\" will be deleted. Continue?",
-					func(ok bool) {
-						if !ok {
-							return
-						}
-
-						editButton.Disable()
-						deleteButton.Disable()
-
-						go func() {
-							err := acService.DeleteAccessControl(
-								acData.ID,
-							)
-
-							fyne.Do(func() {
-								editButton.Enable()
-								deleteButton.Enable()
-
-								if err != nil {
-									dialog.ShowError(
-										err,
-										window,
-									)
-
-									return
-								}
-
-								dialog.ShowInformation(
-									"Success",
-									"Access control berhasil dihapus.",
-									window,
-								)
-
-								reload()
-							})
-						}()
-					},
-					window,
-				)
-			}
-		},
-	)
-
-	var newEntryButton *widget.Button
-
-	newEntryButton = widget.NewButtonWithIcon(
-		"New",
-		theme.ContentAddIcon(),
-		func() {
-			showForm(
-				window,
-				nil,
-				func(newPermission *entity.Permission) {
-					newEntryButton.Disable()
-
-					go func() {
-						_, _, keyPair, err := acService.Create(
-							newPermission.Name,
-							newPermission.Privilege,
-						)
-
-						fyne.Do(func() {
-							newEntryButton.Enable()
-
-							if err != nil {
-								dialog.ShowError(
-									err,
-									window,
-								)
-
-								return
-							}
-
-							dialog.ShowInformation(
-								"Success",
-								"Access control berhasil dibuat.",
-								window,
-							)
-
-							reload()
-
-							if keyPair == nil {
-								return
-							}
-
-							showKeyPair(
-								window,
-								keyPair.PublicKey,
-								keyPair.PrivateKey,
-							)
-						})
-					}()
-				},
-			)
-		},
-	)
-
-	toolbar := container.NewBorder(
-		nil,
-		nil,
-		nil,
-		newEntryButton,
-		search,
-	)
-
-	acContent := container.NewBorder(
-		toolbar,
-		nil,
-		nil,
-		nil,
-		entryList,
-	)
-
-	content.Objects = []fyne.CanvasObject{
-		loadingView.Content,
-	}
-
-	entryList.OnSelected = func(id widget.ListItemID) {
-		if id < 0 || id >= len(filteredACL) {
-			return
+		groupContainer.Objects = []fyne.CanvasObject{
+			groupLoadingView,
 		}
 
-		selectedPermission := filteredACL[id]
+		groupContainer.Refresh()
 
-		userScreen := NewUser(
-			window,
-			appDeps,
-			context,
-			coreService,
-			acService,
-			&selectedPermission,
-			func() {
-				content.Objects = []fyne.CanvasObject{
-					acContent,
+		currentGroupID := ""
+		if selectedGroupTree != nil {
+			currentGroupID = selectedGroupTree.Group.ID
+		}
+
+		go func() {
+			var parentGroup *entity.AccessGroup
+
+			if selectedGroupTree != nil {
+				parentGroup = &selectedGroupTree.Group
+			}
+
+			result, err := accesscontrolService.GroupWithChildren(
+				parentGroup,
+			)
+
+			fyne.Do(func() {
+				groupLoadingBar.Stop()
+				reloadButton.Enable()
+
+				if err != nil {
+					groupContainer.Objects = []fyne.CanvasObject{
+						widget.NewLabel(
+							"Failed to load access groups.",
+						),
+					}
+
+					groupContainer.Refresh()
+					dialog.ShowError(err, window)
+					return
 				}
 
-				content.Refresh()
-			},
-		)
+				groupTree = result
 
-		content.Objects = []fyne.CanvasObject{
-			userScreen.Content,
+				if len(groupTree) == 0 {
+					selectedGroupTree = nil
+					navigationStack = nil
+					units = nil
+
+					groupContainer.Objects = []fyne.CanvasObject{
+						widget.NewLabel("No access groups found."),
+					}
+
+					groupContainer.Refresh()
+
+					unitContainer.Objects = []fyne.CanvasObject{
+						widget.NewLabel("No access group selected."),
+					}
+
+					unitContainer.Refresh()
+					updateLayout()
+					return
+				}
+
+				if currentGroupID == "" || selectedGroupTree == nil {
+					navigationStack = nil
+					selectedGroupTree = nil
+					selectGroup(&groupTree[0])
+					return
+				}
+
+				var refreshedGroup *contract.AccessGroupTree
+
+				for i := range groupTree {
+					if groupTree[i].Group.ID == currentGroupID {
+						refreshedGroup = &groupTree[i]
+						break
+					}
+				}
+
+				if refreshedGroup != nil {
+					selectedGroupTree = refreshedGroup
+
+					if len(navigationStack) > 0 {
+						navigationStack[len(navigationStack)-1] = refreshedGroup
+					}
+
+					delete(unitsByGroup, currentGroupID)
+
+					render()
+					loadUnits(currentGroupID)
+					return
+				}
+
+				groupContainer.Objects = []fyne.CanvasObject{
+					widget.NewLabel(
+						"Unable to refresh the selected access group.",
+					),
+				}
+
+				groupContainer.Refresh()
+				updateLayout()
+			})
+		}()
+	}
+
+	// =========================================================
+	// LOAD UNITS
+	// Dipakai saat pertama memilih group dan saat Reload.
+	// Bukan dipakai setelah save atau delete.
+	// =========================================================
+
+	loadUnits = func(groupID string) {
+		unitRequestID++
+		requestID := unitRequestID
+
+		loadingUnits = true
+		unitLoadingBar.Start()
+
+		unitContainer.Objects = []fyne.CanvasObject{
+			unitLoadingView,
 		}
 
-		content.Refresh()
+		unitContainer.Refresh()
 
-		entryList.Unselect(id)
+		go func() {
+			result, err := accesscontrolService.UnitList(groupID)
+
+			fyne.Do(func() {
+				if requestID != unitRequestID {
+					return
+				}
+
+				unitLoadingBar.Stop()
+				loadingUnits = false
+
+				if err != nil {
+					unitContainer.Objects = []fyne.CanvasObject{
+						widget.NewLabel(
+							"Failed to load access units.",
+						),
+					}
+
+					unitContainer.Refresh()
+					dialog.ShowError(err, window)
+					return
+				}
+
+				units = result
+				unitsByGroup[groupID] = result
+
+				// Callback sama dengan yang digunakan render().
+				unitContainer.Objects = []fyne.CanvasObject{
+					newAccessUnitSection(
+						units,
+						showUnitUsers,
+						saveAccessUnit,
+						deleteAccessUnit,
+						onRevoke,
+					),
+				}
+
+				unitContainer.Refresh()
+			})
+		}()
 	}
 
-	search.OnChanged = func(query string) {
-		if searchTimer != nil {
-			searchTimer.Stop()
-		}
-
-		searchTimer = time.AfterFunc(
-			200*time.Millisecond,
-			func() {
-				filtered := filterACL(
-					allACL,
-					query,
-				)
-
-				fyne.Do(func() {
-					filteredACL = filtered
-
-					entryList.UnselectAll()
-					entryList.Refresh()
-				})
-			},
-		)
-	}
-
-	// Tampilkan loading terlebih dahulu.
-	content.Objects = []fyne.CanvasObject{
-		loadingView.Content,
-	}
-
-	// Jalankan List() di background.
-	go func() {
-		updatedACL, err := acService.List()
-
-		fyne.Do(func() {
-			if err != nil {
-				loadingView.ShowError(
-					"Failed to load access controls.",
-				)
-
-				dialog.ShowError(
-					err,
-					window,
-				)
-
-				return
-			}
-
-			allACL = updatedACL
-
-			filteredACL = filterACL(
-				allACL,
-				search.Text,
-			)
-
-			entryList.Refresh()
-
-			loadingView.Show(
-				acContent,
-			)
-		})
-	}()
+	loadGroups()
 
 	return &Screen{
-		Content: content,
+		Content: root,
+		Reload: func() {
+			loadGroups()
+		},
+		window: window,
 	}
 }
 
-func showForm(
+func showUserActionDialog(
 	window fyne.Window,
-	selectedPermission *entity.Permission,
-	onSave func(permission *entity.Permission),
+	title string,
+	message string,
+	onConfirm func(),
 ) {
-	isEdit := selectedPermission != nil
-
-	var permission entity.Permission
-
-	if isEdit {
-		permission = *selectedPermission
-	}
-
-	nameEntry := widget.NewEntry()
-	nameEntry.SetText(permission.Name)
-
-	privilegeRadio := widget.NewRadioGroup(
-		[]string{
-			string(entity.PrivilegeAdmin),
-			string(entity.PrivilegeWrite),
-			string(entity.PrivilegeRead),
-		},
-		nil,
-	)
-
-	privilegeRadio.Horizontal = false
-
-	if permission.Privilege.IsValid() {
-		privilegeRadio.SetSelected(
-			string(permission.Privilege),
-		)
-	} else {
-		privilegeRadio.SetSelected(
-			string(entity.PrivilegeRead),
-		)
-	}
-
-	form := widget.NewForm(
-		widget.NewFormItem(
-			"Name",
-			nameEntry,
-		),
-		widget.NewFormItem(
-			"Privilege",
-			privilegeRadio,
-		),
-	)
-
-	formContainer := container.NewGridWrap(
-		fyne.NewSize(650, 420),
-		form,
-	)
-
-	title := "New Access Control"
-
-	if isEdit {
-		title = "Edit Access Control"
-	}
-
-	dialog.ShowCustomConfirm(
+	dialog.ShowConfirm(
 		title,
-		"Save",
-		"Cancel",
-		formContainer,
-		func(ok bool) {
-			if !ok {
+		message,
+		func(confirmed bool) {
+			if !confirmed {
 				return
 			}
 
-			name := nameEntry.Text
-
-			if name == "" {
-				dialog.ShowInformation(
-					"Invalid Input",
-					"Name is required.",
-					window,
-				)
-
-				return
+			if onConfirm != nil {
+				onConfirm()
 			}
-
-			if privilegeRadio.Selected == "" {
-				dialog.ShowInformation(
-					"Invalid Input",
-					"Privilege is required.",
-					window,
-				)
-
-				return
-			}
-
-			permission.Name = name
-			permission.Privilege = entity.Privilege(
-				privilegeRadio.Selected,
-			)
-
-			onSave(&permission)
 		},
-		window,
-	)
-}
-
-func showKeyPair(
-	window fyne.Window,
-	publicKey string,
-	privateKey string,
-) {
-	publicKeyEntry := widget.NewMultiLineEntry()
-	publicKeyEntry.SetText(publicKey)
-	publicKeyEntry.SetMinRowsVisible(6)
-	publicKeyEntry.Disable()
-
-	privateKeyEntry := widget.NewMultiLineEntry()
-	privateKeyEntry.SetText(privateKey)
-	privateKeyEntry.SetMinRowsVisible(8)
-	privateKeyEntry.Disable()
-
-	content := container.NewVBox(
-		widget.NewLabelWithStyle(
-			"Public Key",
-			fyne.TextAlignLeading,
-			fyne.TextStyle{
-				Bold: true,
-			},
-		),
-		publicKeyEntry,
-
-		widget.NewLabelWithStyle(
-			"Private Key",
-			fyne.TextAlignLeading,
-			fyne.TextStyle{
-				Bold: true,
-			},
-		),
-		privateKeyEntry,
-
-		widget.NewLabel(
-			"The private key is only displayed now. Save it securely before closing this dialog.",
-		),
-	)
-
-	dialog.ShowCustom(
-		"Access Control Key Pair",
-		"Close",
-		content,
 		window,
 	)
 }

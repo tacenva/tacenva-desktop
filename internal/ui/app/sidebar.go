@@ -28,12 +28,14 @@ type navItem struct {
 	onTap    func()
 	hover    bool
 	selected bool
+	disabled bool
 }
 
 func newNavItem(
 	menu menuItem,
 	text string,
 	icon fyne.Resource,
+	disabled bool,
 	onTap func(),
 ) *navItem {
 	item := &navItem{
@@ -43,7 +45,8 @@ func newNavItem(
 		bg: canvas.NewRectangle(
 			theme.Color(theme.ColorNameBackground),
 		),
-		onTap: onTap,
+		onTap:    onTap,
+		disabled: disabled,
 	}
 
 	item.ExtendBaseWidget(item)
@@ -68,12 +71,18 @@ func (item *navItem) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (item *navItem) Tapped(_ *fyne.PointEvent) {
-	if item.onTap != nil {
-		item.onTap()
+	if item.disabled || item.onTap == nil {
+		return
 	}
+
+	item.onTap()
 }
 
 func (item *navItem) MouseIn(_ *desktop.MouseEvent) {
+	if item.disabled {
+		return
+	}
+
 	item.hover = true
 	item.refreshBackground()
 }
@@ -83,21 +92,41 @@ func (item *navItem) MouseOut() {
 	item.refreshBackground()
 }
 
-func (item *navItem) MouseMoved(_ *desktop.MouseEvent) {
-}
-
 func (item *navItem) SetSelected(selected bool) {
+	if item.disabled {
+		return
+	}
+
 	item.selected = selected
 	item.refreshBackground()
 }
 
+func (item *navItem) MouseMoved(_ *desktop.MouseEvent) {
+}
+
+func (item *navItem) SetDisabled(disabled bool) {
+	item.disabled = disabled
+
+	if disabled {
+		item.hover = false
+		item.selected = false
+	}
+
+	item.refreshBackground()
+	item.Refresh()
+}
+
 func (item *navItem) refreshBackground() {
-	if item.selected || item.hover {
+	if item.disabled {
+		item.bg.FillColor = theme.Color(theme.ColorNameBackground)
+	} else if item.selected || item.hover {
 		item.bg.FillColor = theme.Color(theme.ColorNameHover)
 	} else {
 		item.bg.FillColor = theme.Color(theme.ColorNameBackground)
 	}
 
+	item.label.Refresh()
+	item.icon.Refresh()
 	item.bg.Refresh()
 }
 
@@ -105,7 +134,7 @@ func newSidebar(
 	vaultMenu func(),
 	accessControlMenu func(),
 	settingsMenu func(),
-) fyne.CanvasObject {
+) (fyne.CanvasObject, *navItem) {
 	logo := widget.NewLabelWithStyle(
 		"Menu",
 		fyne.TextAlignLeading,
@@ -121,29 +150,42 @@ func newSidebar(
 	var settings *navItem
 
 	selectItem := func(item *navItem) {
+		if item == nil || item.disabled {
+			return
+		}
+
+		var onSelect func()
+
+		switch item.menu {
+		case menuVault:
+			onSelect = vaultMenu
+		case menuAccessControl:
+			onSelect = accessControlMenu
+		case menuSettings:
+			onSelect = settingsMenu
+		default:
+			return
+		}
+
+		if onSelect == nil {
+			return
+		}
+
+		onSelect()
+
 		if selectedItem != nil {
 			selectedItem.SetSelected(false)
 		}
 
 		selectedItem = item
 		selectedItem.SetSelected(true)
-
-		switch item.menu {
-		case menuVault:
-			vaultMenu()
-
-		case menuAccessControl:
-			accessControlMenu()
-
-		case menuSettings:
-			settingsMenu()
-		}
 	}
 
 	vault = newNavItem(
 		menuVault,
 		"Vault",
 		theme.ListIcon(),
+		false,
 		func() {
 			selectItem(vault)
 		},
@@ -153,6 +195,7 @@ func newSidebar(
 		menuAccessControl,
 		"Access Control",
 		theme.AccountIcon(),
+		accessControlMenu == nil,
 		func() {
 			selectItem(accessControl)
 		},
@@ -162,6 +205,7 @@ func newSidebar(
 		menuSettings,
 		"Settings",
 		theme.SettingsIcon(),
+		false,
 		func() {
 			selectItem(settings)
 		},
@@ -189,5 +233,5 @@ func newSidebar(
 	// Vault menjadi menu default.
 	selectItem(vault)
 
-	return container.NewPadded(content)
+	return container.NewPadded(content), accessControl
 }
