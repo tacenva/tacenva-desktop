@@ -1,0 +1,53 @@
+
+name: Build Go Binary
+description: Setup Go and build tacpassd for the target platform
+
+inputs:
+  goos:
+    description: Target operating system
+    required: true
+  goarch:
+    description: Target architecture
+    required: true
+  version:
+    description: Application version
+    required: true
+
+outputs:
+  binary:
+    description: Path to the built binary
+    value: ${{ steps.build.outputs.binary }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Build
+      id: build
+      shell: bash
+      env:
+        GOOS: ${{ inputs.goos }}
+        GOARCH: ${{ inputs.goarch }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        mkdir -p dist
+
+        NAME="tacpassd-${GOOS}-${GOARCH}"
+
+        if [ "$GOOS" = "windows" ]; then
+          NAME="${NAME}.exe"
+        fi
+
+        CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X github.com/tacenva/tacpassd/internal/app.Version=${VERSION}" \
+            -o "dist/${NAME}" \
+            ./cmd/tacpassd
+
+        echo "binary=dist/${NAME}" >> "$GITHUB_OUTPUT"

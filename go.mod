@@ -1,12 +1,14 @@
 module github.com/tacenva/tacenva-desktop
 
-go 1.26.5
+go 1.27.2
 
 require (
 	fyne.io/fyne/v2 v2.8.1
-	github.com/tacenva/database v1.0.0-alpha.4
-	github.com/tacenva/tacenva-services v1.0.0-alpha.3
-	github.com/tacenva/tacpass-core v1.0.0-alpha.4
+	github.com/oklog/ulid/v2 v2.1.2
+	github.com/tacenva/database v1.0.0-alpha.5
+	github.com/tacenva/tacenva-core v1.0.0-alpha.1
+	github.com/tacenva/tacenva-services v1.0.0-alpha.4
+	github.com/tacenva/tacpass-core v1.0.0-alpha.5
 )
 
 require (
@@ -38,7 +40,6 @@ require (
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect
-	github.com/oklog/ulid/v2 v2.1.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rymdport/portal v0.4.2 // indirect
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c // indirect

@@ -1,0 +1,186 @@
+name: Alpha Release
+
+on:
+  push:
+    branches:
+      - alpha
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpha-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Generate Alpha Version
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+
+    env:
+      BASE_VERSION: "1.0.0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify branch
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "alpha" ]]; then
+            echo "Error: Must run from alpha branch."
+            exit 1
+          fi
+
+      - name: Fetch all tags
+        run: git fetch --force --tags
+
+      - name: Generate next version
+        id: version
+        shell: bash
+        run: |
+          PREFIX="v${BASE_VERSION}-alpha"
+
+          LAST_TAG=$(git tag --list "${PREFIX}.*" \
+            --sort=-version:refname | head -n 1)
+
+          if [[ -z "$LAST_TAG" ]]; then
+            NEXT=1
+          else
+            LAST_NUMBER="${LAST_TAG##*.}"
+
+            if [[ ! "$LAST_NUMBER" =~ ^[0-9]+$ ]]; then
+              echo "Invalid tag: $LAST_TAG"
+              exit 1
+            fi
+
+            NEXT=$((LAST_NUMBER + 1))
+          fi
+
+          NEW_TAG="${PREFIX}.${NEXT}"
+
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          echo "Next release: $NEW_TAG"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build Binary
+        uses: ./.github/actions/build
+        with:
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          version: ${{ needs.prepare.outputs.tag }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: tacpassd-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create Alpha Tag & Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+
+    env:
+      NEW_TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: true
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Git tag
+        shell: bash
+        run: |
+          git fetch --force --tags
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${NEW_TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${NEW_TAG}"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)
+
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+            push origin "$NEW_TAG"
+
+      - name: Create GitHub Pre-release
+        run: |
+          gh release create "$NEW_TAG" dist/* \
+            --title "$NEW_TAG" \
+            --target alpha \
+            --generate-notes \
+            --prerelease
+
+      - name: Release summary
+        run: |
+          echo "## Alpha Release Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** $NEW_TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** alpha" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Type:** Pre-release" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Binaries" >> "$GITHUB_STEP_SUMMARY"
+          ls -1 dist/ >> "$GITHUB_STEP_SUMMARY"
