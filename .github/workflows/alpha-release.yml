@@ -1,3 +1,4 @@
+
 name: Alpha Release
 
 on:
@@ -9,10 +10,53 @@ permissions:
   contents: write
 
 concurrency:
-  group: alpha-release-${{ github.ref }}
+  group: alpha-release
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Generate Alpha Version
+    runs-on: ubuntu-24.04
+
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+
+    env:
+      BASE_VERSION: "1.0.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Generate Next Version
+        id: version
+        shell: bash
+        run: |
+          PREFIX="v${BASE_VERSION}-alpha"
+
+          LAST_TAG=$(git tag --list "${PREFIX}.*" \
+            --sort=-version:refname | head -n 1)
+
+          if [[ -z "$LAST_TAG" ]]; then
+            NEXT=1
+          else
+            LAST_NUMBER="${LAST_TAG##*.}"
+
+            if [[ ! "$LAST_NUMBER" =~ ^[0-9]+$ ]]; then
+              echo "Invalid tag: $LAST_TAG"
+              exit 1
+            fi
+
+            NEXT=$((LAST_NUMBER + 1))
+          fi
+
+          NEW_TAG="${PREFIX}.${NEXT}"
+
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          echo "Next release: $NEW_TAG"
+
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -20,8 +64,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -46,7 +88,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    needs: test
+    needs: [prepare, test]
     runs-on: ${{ matrix.runner }}
 
     strategy:
@@ -83,7 +125,7 @@ jobs:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: tacenva-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -91,23 +133,58 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  create-release:
-    name: Create GitHub Alpha Release
-    needs: build
+  release:
+    name: Create Alpha Tag & Release
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
 
+    env:
+      NEW_TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+
     steps:
-      - name: Download artifacts
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download Build Artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
-      - name: Create GitHub Alpha Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.0-alpha.${{ github.run_number }}
-          target_commitish: ${{ github.sha }}
-          prerelease: true
-          generate_release_notes: true
-          files: dist/*
+      - name: Create Git Tag
+        shell: bash
+        run: |
+          git fetch --force --tags
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${NEW_TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${NEW_TAG}"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+          git push origin "$NEW_TAG"
+
+      - name: Create GitHub Pre-release
+        run: |
+          gh release create "$NEW_TAG" dist/* \
+            --title "$NEW_TAG" \
+            --generate-notes \
+            --prerelease
+
+      - name: Release Summary
+        run: |
+          echo "## Alpha Release Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** $NEW_TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** alpha" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Type:** Pre-release" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Binaries" >> "$GITHUB_STEP_SUMMARY"
+          ls -1 dist/ >> "$GITHUB_STEP_SUMMARY"
