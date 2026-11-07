@@ -2,8 +2,8 @@ name: Alpha Release
 
 on:
   push:
-    tags:
-      - "v*-alpha.*"
+    branches:
+      - alpha
 
 permissions:
   contents: write
@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -104,6 +106,8 @@ jobs:
       - name: Create GitHub Alpha Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v1.0.0-alpha.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
           prerelease: true
           generate_release_notes: true
           files: dist/*
