@@ -15,7 +15,7 @@ concurrency:
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -27,27 +27,48 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            gcc \
+            xorg-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libwayland-dev \
+            libxkbcommon-dev
+
       - name: Test
         run: go test ./...
 
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
+          - runner: ubuntu-24.04
+            goos: linux
             goarch: amd64
-          - goos: linux
+
+          - runner: ubuntu-24.04-arm
+            goos: linux
             goarch: arm64
-          - goos: darwin
+
+          - runner: macos-15-intel
+            goos: darwin
             goarch: amd64
-          - goos: darwin
+
+          - runner: macos-14
+            goos: darwin
             goarch: arm64
-          - goos: windows
+
+          - runner: windows-2025
+            goos: windows
             goarch: amd64
 
     steps:
@@ -59,17 +80,11 @@ jobs:
         with:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
-          version: main-${{ github.sha }}
 
-      - name: Build summary
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: |
-          echo "## Build completed" >> "$GITHUB_STEP_SUMMARY"
-          echo "Branch: main" >> "$GITHUB_STEP_SUMMARY"
-          echo "Commit: ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Linux AMD64" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Linux ARM64" >> "$GITHUB_STEP_SUMMARY"
-          echo "- macOS AMD64" >> "$GITHUB_STEP_SUMMARY"
-          echo "- macOS ARM64" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Windows AMD64" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: tacenva-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7

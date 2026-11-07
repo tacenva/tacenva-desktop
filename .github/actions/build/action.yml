@@ -1,6 +1,5 @@
-
-name: Build Go Binary
-description: Setup Go and build tacpassd for the target platform
+name: Build Tacenva Desktop
+description: Setup dependencies and build Tacenva Desktop
 
 inputs:
   goos:
@@ -9,18 +8,24 @@ inputs:
   goarch:
     description: Target architecture
     required: true
-  version:
-    description: Application version
-    required: true
-
-outputs:
-  binary:
-    description: Path to the built binary
-    value: ${{ steps.build.outputs.binary }}
 
 runs:
   using: composite
   steps:
+    - name: Install Linux dependencies
+      if: inputs.goos == 'linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config \
+          gcc \
+          xorg-dev \
+          libgl1-mesa-dev \
+          libegl1-mesa-dev \
+          libwayland-dev \
+          libxkbcommon-dev
+
     - name: Setup Go
       uses: actions/setup-go@v6
       with:
@@ -28,26 +33,31 @@ runs:
         cache: true
 
     - name: Build
-      id: build
       shell: bash
       env:
         GOOS: ${{ inputs.goos }}
         GOARCH: ${{ inputs.goarch }}
-        VERSION: ${{ inputs.version }}
       run: |
         mkdir -p dist
 
-        NAME="tacpassd-${GOOS}-${GOARCH}"
+        NAME="tacenva-${GOOS}-${GOARCH}"
 
         if [ "$GOOS" = "windows" ]; then
           NAME="${NAME}.exe"
         fi
 
-        CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-          go build \
-            -trimpath \
-            -ldflags="-s -w -X github.com/tacenva/tacpassd/internal/app.Version=${VERSION}" \
-            -o "dist/${NAME}" \
-            ./cmd/tacpassd
+        if [ "$GOOS" = "linux" ]; then
+          export CGO_ENABLED=1
+        fi
 
-        echo "binary=dist/${NAME}" >> "$GITHUB_OUTPUT"
+        LDFLAGS="-s -w"
+
+        if [ "$GOOS" = "windows" ]; then
+          LDFLAGS="$LDFLAGS -H=windowsgui"
+        fi
+
+        go build \
+          -trimpath \
+          -ldflags="$LDFLAGS" \
+          -o "dist/${NAME}" \
+          ./cmd/tacenva
