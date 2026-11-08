@@ -98,10 +98,10 @@ func NewRecordScreen(
 		filtered := make([]tacpassentity.VaultRecord, 0, len(records))
 
 		for _, record := range records {
-			name := strings.ToLower(record.Name)
+			identifier := strings.ToLower(record.Identifier)
 			endpoint := strings.ToLower(record.Endpoint)
 
-			if strings.Contains(name, query) ||
+			if strings.Contains(identifier, query) ||
 				strings.Contains(endpoint, query) {
 				filtered = append(filtered, record)
 			}
@@ -306,13 +306,13 @@ func NewRecordScreen(
 			return len(filteredVaultRecords)
 		},
 		func() fyne.CanvasObject {
-			name := widget.NewLabel("")
+			identifier := widget.NewLabel("")
 			endpoint := widget.NewLabel("")
 			password := widget.NewLabel(hiddenPassword)
-			expiredAt := widget.NewLabel("")
+			renewalDate := widget.NewLabel("")
 
-			name.TextStyle = fyne.TextStyle{Bold: true}
-			expiredAt.TextStyle = fyne.TextStyle{Italic: true}
+			identifier.TextStyle = fyne.TextStyle{Bold: true}
+			renewalDate.TextStyle = fyne.TextStyle{Italic: true}
 
 			copyButton := widget.NewButtonWithIcon(
 				"",
@@ -324,24 +324,30 @@ func NewRecordScreen(
 				nil, nil, nil, copyButton, password,
 			)
 
-			nameCell := container.NewBorder(
-				nil, nil, nil, nil, name,
+			identifierCell := container.NewBorder(
+				nil, nil, nil, nil, identifier,
 			)
 
 			endpointCell := container.NewBorder(
 				nil, nil, nil, nil, endpoint,
 			)
 
-			expiredAtCell := container.NewBorder(
-				nil, nil, nil, nil, expiredAt,
+			renewalDateIcon := widget.NewIcon(nil)
+
+			renewalDateCell := container.NewBorder(
+				nil, nil, nil, nil,
+				container.NewHBox(
+					renewalDateIcon,
+					renewalDate,
+				),
 			)
 
 			info := container.NewGridWithColumns(
 				4,
-				nameCell,
+				identifierCell,
 				endpointCell,
 				passwordCell,
-				expiredAtCell,
+				renewalDateCell,
 			)
 
 			if !isWriter {
@@ -413,8 +419,8 @@ func NewRecordScreen(
 				return
 			}
 
-			nameCell, ok := info.Objects[0].(*fyne.Container)
-			if !ok || len(nameCell.Objects) == 0 {
+			identifierCell, ok := info.Objects[0].(*fyne.Container)
+			if !ok || len(identifierCell.Objects) == 0 {
 				return
 			}
 
@@ -428,12 +434,7 @@ func NewRecordScreen(
 				return
 			}
 
-			expiredAtCell, ok := info.Objects[3].(*fyne.Container)
-			if !ok || len(expiredAtCell.Objects) == 0 {
-				return
-			}
-
-			name, ok := nameCell.Objects[0].(*widget.Label)
+			identifier, ok := identifierCell.Objects[0].(*widget.Label)
 			if !ok {
 				return
 			}
@@ -453,7 +454,22 @@ func NewRecordScreen(
 				return
 			}
 
-			expiredAt, ok := expiredAtCell.Objects[0].(*widget.Label)
+			renewalDateBorder, ok := info.Objects[3].(*fyne.Container)
+			if !ok || len(renewalDateBorder.Objects) == 0 {
+				return
+			}
+
+			renewalDateBox, ok := renewalDateBorder.Objects[0].(*fyne.Container)
+			if !ok || len(renewalDateBox.Objects) < 2 {
+				return
+			}
+
+			renewalDateIcon, ok := renewalDateBox.Objects[0].(*widget.Icon)
+			if !ok {
+				return
+			}
+
+			renewalDate, ok := renewalDateBox.Objects[1].(*widget.Label)
 			if !ok {
 				return
 			}
@@ -482,7 +498,7 @@ func NewRecordScreen(
 				}
 			}
 
-			name.SetText(record.Name)
+			identifier.SetText(record.Identifier)
 			endpoint.SetText(record.Endpoint)
 			password.SetText(hiddenPassword)
 
@@ -496,13 +512,49 @@ func NewRecordScreen(
 				)
 			}
 
-			if record.ExpiredAt.IsZero() {
-				expiredAt.SetText("-")
+			if record.RenewalDate.IsZero() {
+				renewalDate.SetText("-")
+				renewalDate.Importance = widget.LowImportance
+				renewalDateIcon.SetResource(nil)
 			} else {
-				expiredAt.SetText(
-					record.ExpiredAt.Format("02 Jan 2006"),
+				renewalDate.SetText(
+					record.RenewalDate.Format("02 Jan 2006"),
 				)
+
+				now := time.Now()
+				today := time.Date(
+					now.Year(),
+					now.Month(),
+					now.Day(),
+					0, 0, 0, 0,
+					now.Location(),
+				)
+
+				renewal := record.RenewalDate.In(now.Location())
+				renewalDay := time.Date(
+					renewal.Year(),
+					renewal.Month(),
+					renewal.Day(),
+					0, 0, 0, 0,
+					now.Location(),
+				)
+
+				daysRemaining := int(renewalDay.Sub(today).Hours() / 24)
+
+				if daysRemaining < 0 {
+					renewalDate.Importance = widget.DangerImportance
+					renewalDateIcon.SetResource(theme.ErrorIcon())
+				} else if daysRemaining <= 7 {
+					renewalDate.Importance = widget.WarningImportance
+					renewalDateIcon.SetResource(theme.WarningIcon())
+				} else {
+					renewalDate.Importance = widget.MediumImportance
+					renewalDateIcon.SetResource(nil)
+				}
 			}
+
+			renewalDate.Refresh()
+			renewalDateIcon.Refresh()
 
 			if !isWriter {
 				return
@@ -558,7 +610,7 @@ func NewRecordScreen(
 
 				dialog.ShowConfirm(
 					"Delete Record",
-					"Record \""+record.Name+
+					"Record \""+record.Identifier+
 						"\" will be deleted. Continue?",
 					func(ok bool) {
 						if !ok {
@@ -704,10 +756,12 @@ func showRecordForm(
 		record = *selectedRecord
 	}
 
-	nameEntry := widget.NewEntry()
-	nameEntry.SetText(record.Name)
+	identifierEntry := widget.NewEntry()
+	identifierEntry.SetPlaceHolder("e.g. john.doe@gmail.com, @johndoe, postgres_user")
+	identifierEntry.SetText(record.Identifier)
 
 	endpointEntry := widget.NewEntry()
+	endpointEntry.SetPlaceHolder("e.g. instagram.com, db.example.com, postgresql://localhost:5432")
 	endpointEntry.SetText(record.Endpoint)
 
 	passwordEntry := widget.NewPasswordEntry()
@@ -731,18 +785,18 @@ func showRecordForm(
 		nil, nil, nil, generatePasswordButton, passwordEntry,
 	)
 
-	expiredAtEntry := widget.NewDateEntry()
+	renewalDateEntry := widget.NewDateEntry()
 
-	if !record.ExpiredAt.IsZero() {
-		expiredAt := record.ExpiredAt
-		expiredAtEntry.SetDate(&expiredAt)
+	if !record.RenewalDate.IsZero() {
+		renewalDate := record.RenewalDate
+		renewalDateEntry.SetDate(&renewalDate)
 	}
 
 	form := widget.NewForm(
-		widget.NewFormItem("Name", nameEntry),
+		widget.NewFormItem("Identifier", identifierEntry),
 		widget.NewFormItem("Endpoint", endpointEntry),
 		widget.NewFormItem("Password", passwordContainer),
-		widget.NewFormItem("Expired At", expiredAtEntry),
+		widget.NewFormItem("Renewal Date", renewalDateEntry),
 	)
 
 	formContainer := container.NewGridWrap(
@@ -765,27 +819,27 @@ func showRecordForm(
 				return
 			}
 
-			name := strings.TrimSpace(nameEntry.Text)
+			identifier := strings.TrimSpace(identifierEntry.Text)
 			endpoint := strings.TrimSpace(endpointEntry.Text)
 			password := passwordEntry.Text
 
-			if name == "" || endpoint == "" || password == "" {
+			if identifier == "" || endpoint == "" || password == "" {
 				dialog.ShowInformation(
 					"Invalid Input",
-					"Name, endpoint, and password are required.",
+					"Identifier, endpoint, and password are required.",
 					window,
 				)
 				return
 			}
 
-			record.Name = name
+			record.Identifier = identifier
 			record.Endpoint = endpoint
 			record.Password = password
 
-			if expiredAtEntry.Date == nil {
-				record.ExpiredAt = time.Time{}
+			if renewalDateEntry.Date == nil {
+				record.RenewalDate = time.Time{}
 			} else {
-				record.ExpiredAt = *expiredAtEntry.Date
+				record.RenewalDate = *renewalDateEntry.Date
 			}
 
 			if onSave != nil {

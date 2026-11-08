@@ -46,7 +46,7 @@ func newUserListSection(
 			if id.Row == 0 {
 				headers := []string{
 					"",
-					"Hostname",
+					"Sot Identity",
 					"Join At",
 					"Status",
 					"",
@@ -119,13 +119,13 @@ func newUserListSection(
 				}
 
 			case 1:
-				hostname := user.Hostname
-				if hostname == "" {
-					hostname = "Unknown host"
+				sotIdentity := user.SotIdentity
+				if sotIdentity == "" {
+					sotIdentity = "Unknown identity"
 				}
 
 				label := widget.NewLabelWithStyle(
-					hostname,
+					sotIdentity,
 					fyne.TextAlignLeading,
 					fyne.TextStyle{Bold: true},
 				)
@@ -156,16 +156,16 @@ func newUserListSection(
 					"",
 					theme.DeleteIcon(),
 					func() {
-						hostname := user.Hostname
-						if hostname == "" {
-							hostname = "Unknown host"
+						sotIdentity := user.SotIdentity
+						if sotIdentity == "" {
+							sotIdentity = "Unknown identity"
 						}
 
 						dialog.ShowConfirm(
 							"Delete User",
 							fmt.Sprintf(
 								"Are you sure you want to delete user %q?",
-								hostname,
+								sotIdentity,
 							),
 							func(confirmed bool) {
 								if confirmed && onDelete != nil {

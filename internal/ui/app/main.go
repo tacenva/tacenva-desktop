@@ -75,7 +75,7 @@ func New(
 	)
 
 	backButton := widget.NewButtonWithIcon(
-		context.SelectedSot.Hostname,
+		context.SelectedSot.SotIdentity,
 		theme.NavigateBackIcon(),
 		onBack,
 	)

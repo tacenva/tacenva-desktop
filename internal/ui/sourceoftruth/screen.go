@@ -188,10 +188,10 @@ func New(
 			return len(sotList)
 		},
 		func() fyne.CanvasObject {
-			name := widget.NewLabel("")
+			identity := widget.NewLabel("")
 			address := widget.NewLabel("")
 
-			name.TextStyle = fyne.TextStyle{
+			identity.TextStyle = fyne.TextStyle{
 				Bold: true,
 			}
 
@@ -212,12 +212,12 @@ func New(
 				deleteButton,
 			)
 
-			nameCell := container.NewBorder(
+			identityCell := container.NewBorder(
 				nil,
 				nil,
 				nil,
 				nil,
-				name,
+				identity,
 			)
 
 			addressCell := container.NewBorder(
@@ -238,7 +238,7 @@ func New(
 
 			return container.NewGridWithColumns(
 				3,
-				nameCell,
+				identityCell,
 				addressCell,
 				actionCell,
 			)
@@ -252,18 +252,18 @@ func New(
 
 			row := obj.(*fyne.Container)
 
-			nameCell := row.Objects[0].(*fyne.Container)
+			identityCell := row.Objects[0].(*fyne.Container)
 			addressCell := row.Objects[1].(*fyne.Container)
 			actionCell := row.Objects[2].(*fyne.Container)
 
-			name := nameCell.Objects[0].(*widget.Label)
+			identity := identityCell.Objects[0].(*widget.Label)
 			address := addressCell.Objects[0].(*widget.Label)
 			actions := actionCell.Objects[0].(*fyne.Container)
 
 			editButton := actions.Objects[0].(*widget.Button)
 			deleteButton := actions.Objects[1].(*widget.Button)
 
-			name.SetText(selectedSot.Hostname)
+			identity.SetText(selectedSot.SotIdentity)
 			address.SetText(selectedSot.Address)
 
 			if discoveryState.Done() {
@@ -300,7 +300,7 @@ func New(
 
 				showDeleteConfirm(
 					window,
-					selectedSot.Hostname,
+					selectedSot.SotIdentity,
 					func() {
 						if err := sotService.Delete(&selectedSot); err != nil {
 							dialog.ShowError(err, window)
@@ -337,7 +337,7 @@ func New(
 				nil,
 				func(newSot *entity.SourceOfTruth) {
 					_, err := sotService.Create(
-						newSot.Hostname,
+						newSot.SotIdentity,
 						newSot.Address,
 						newSot.Auth.KeyPairOfAccessUnit,
 						newSot.SyncMode,
@@ -554,9 +554,9 @@ func showForm(
 		sot = *selectedSot
 	}
 
-	hostnameEntry := widget.NewEntry()
-	hostnameEntry.SetText(sot.Hostname)
-	hostnameEntry.SetPlaceHolder("Optional alias")
+	identityEntry := widget.NewEntry()
+	identityEntry.SetText(sot.SotIdentity)
+	identityEntry.SetPlaceHolder("Optional alias")
 
 	addressEntry := widget.NewEntry()
 	addressEntry.SetText(sot.Address)
@@ -594,8 +594,8 @@ func showForm(
 
 	formItems := []*widget.FormItem{
 		widget.NewFormItem(
-			"Hostname",
-			hostnameEntry,
+			"Identity",
+			identityEntry,
 		),
 		widget.NewFormItem(
 			"Address",
@@ -657,7 +657,7 @@ func showForm(
 				return
 			}
 
-			sot.Hostname = hostnameEntry.Text
+			sot.SotIdentity = identityEntry.Text
 			sot.Address = address
 			if sot.Auth == nil {
 				sot.Auth = &entity.Auth{}
@@ -681,12 +681,12 @@ func showForm(
 
 func showDeleteConfirm(
 	window fyne.Window,
-	hostname string,
+	identity string,
 	onDelete func(),
 ) {
 	dialog.ShowConfirm(
 		"Delete Source of Truth",
-		"Source of Truth \""+hostname+"\" will be deleted. Do you want to continue?",
+		"Source of Truth \""+identity+"\" will be deleted. Do you want to continue?",
 		func(ok bool) {
 			if !ok {
 				return

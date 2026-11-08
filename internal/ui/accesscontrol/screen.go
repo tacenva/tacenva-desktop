@@ -730,7 +730,7 @@ func New(
 					showUserActionDialog(
 						window,
 						"Approve User",
-						fmt.Sprintf("Approve user %q?", user.Hostname),
+						fmt.Sprintf("Approve user %q?", user.SotIdentity),
 						func() {
 							runWithLoading(
 								window,
@@ -749,7 +749,7 @@ func New(
 										"Success",
 										fmt.Sprintf(
 											"User %q approved successfully.",
-											user.Hostname,
+											user.SotIdentity,
 										),
 										window,
 									)
@@ -766,7 +766,7 @@ func New(
 						"Revoke User",
 						fmt.Sprintf(
 							"Revoke access for user %q?",
-							user.Hostname,
+							user.SotIdentity,
 						),
 						func() {
 							runWithLoading(
@@ -786,7 +786,7 @@ func New(
 										"Success",
 										fmt.Sprintf(
 											"User %q revoked successfully.",
-											user.Hostname,
+											user.SotIdentity,
 										),
 										window,
 									)
@@ -812,7 +812,7 @@ func New(
 								"Success",
 								fmt.Sprintf(
 									"User %q deleted successfully.",
-									user.Hostname,
+									user.SotIdentity,
 								),
 								window,
 							)
