@@ -45,6 +45,7 @@ func Run(dev bool) {
 	loginScreen := login.New(
 		window,
 		appDeps,
+		Version,
 		services,
 		sotService,
 		discoveryState,

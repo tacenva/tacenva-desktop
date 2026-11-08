@@ -8,6 +8,9 @@ inputs:
   goarch:
     description: Target architecture
     required: true
+  version:
+    description: Application version
+    required: true
 
 runs:
   using: composite
@@ -37,6 +40,7 @@ runs:
       env:
         GOOS: ${{ inputs.goos }}
         GOARCH: ${{ inputs.goarch }}
+        VERSION: ${{ inputs.version }}
       run: |
         mkdir -p dist
 
@@ -50,7 +54,7 @@ runs:
           export CGO_ENABLED=1
         fi
 
-        LDFLAGS="-s -w"
+        LDFLAGS="-s -w -X github.com/tacenva/tacenva/internal/app.Version=${VERSION}"
 
         if [ "$GOOS" = "windows" ]; then
           LDFLAGS="$LDFLAGS -H=windowsgui"

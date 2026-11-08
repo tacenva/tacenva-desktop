@@ -37,6 +37,7 @@ func New(
 	window fyne.Window,
 	appDeps *app.Deps,
 	context *app.Context,
+	version string,
 	masterKey string,
 	coreService *coreApp.Services,
 	sotService *sourceoftruth.Service,
@@ -58,6 +59,7 @@ func New(
 
 	settingScreen := setting.New(
 		window,
+		version,
 		func(currentPassword, newPassword string) error {
 			return sotService.ChangePassword(
 				currentPassword,

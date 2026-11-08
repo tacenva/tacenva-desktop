@@ -370,30 +370,26 @@ func New(
 				parentAccess := parentAccessCheck.Checked
 
 				go func() {
+					var encodedKey string
+
 					runWithLoading(
 						window,
 						"Creating Access Group",
 						"Creating access group, please wait...",
 						func() error {
-							return accesscontrolService.CreateGroup(
+							var err error
+
+							encodedKey, err = accesscontrolService.CreateGroup(
 								newGroup,
 								adminUnit,
 								parentAccess,
 							)
+
+							return err
 						},
 						func() {
-							fyne.Do(func() {
-								dialog.ShowInformation(
-									"Success",
-									fmt.Sprintf(
-										"Access group %q created successfully.",
-										groupName,
-									),
-									window,
-								)
-
-								loadGroups()
-							})
+							showSecretKeyDialog(window, encodedKey)
+							loadGroups()
 						},
 					)
 
@@ -426,12 +422,12 @@ func New(
 		onError func(error),
 	) {
 		if selectedGroupTree == nil {
-			onError(fmt.Errorf("select an access group first"))
+			onError(fmt.Errorf("please select an access group first"))
 			return
 		}
 
 		if accessUnit == nil {
-			onError(fmt.Errorf("access unit is invalid"))
+			onError(fmt.Errorf("invalid access unit"))
 			return
 		}
 
@@ -439,6 +435,7 @@ func New(
 		isCreate := accessUnit.ID == ""
 
 		unitCopy := *accessUnit
+		encodedKey := ""
 
 		if isCreate {
 			unitCopy.GroupID = groupID
@@ -448,19 +445,23 @@ func New(
 		runWithLoading(
 			window,
 			"Saving Access Unit",
-			"Saving access unit changes...",
+			"Please wait while the access unit is being saved...",
 			func() error {
 				if isCreate {
-					return accesscontrolService.CreateUnit(&unitCopy)
+					var err error
+
+					encodedKey, err = accesscontrolService.CreateUnit(
+						&unitCopy,
+					)
+
+					return err
 				}
 
 				return accesscontrolService.UpdateUnit(&unitCopy)
 			},
 			func() {
-				// Sinkronkan hasil ke objek form.
 				*accessUnit = unitCopy
 
-				// Update cache hanya setelah request berhasil.
 				groupUnits := unitsByGroup[groupID]
 				found := false
 
@@ -498,11 +499,15 @@ func New(
 
 				render()
 
-				dialog.ShowInformation(
-					"Success",
-					"Access unit saved successfully.",
-					window,
-				)
+				if isCreate {
+					showSecretKeyDialog(window, encodedKey)
+				} else {
+					dialog.ShowInformation(
+						"Success",
+						"Access unit updated successfully.",
+						window,
+					)
+				}
 
 				if onSuccess != nil {
 					onSuccess()
@@ -1234,4 +1239,77 @@ func showUserActionDialog(
 		},
 		window,
 	)
+}
+
+func showSecretKeyDialog(
+	window fyne.Window,
+	encodedKey string,
+) {
+	encodedKeyEntry := widget.NewEntry()
+	encodedKeyEntry.SetText(encodedKey)
+	encodedKeyEntry.Password = true
+
+	var showHideButton *widget.Button
+	showHideButton = widget.NewButtonWithIcon(
+		"",
+		theme.VisibilityIcon(),
+		func() {
+			encodedKeyEntry.Password = !encodedKeyEntry.Password
+
+			if encodedKeyEntry.Password {
+				showHideButton.SetIcon(theme.VisibilityIcon())
+			} else {
+				showHideButton.SetIcon(theme.VisibilityOffIcon())
+			}
+
+			encodedKeyEntry.Refresh()
+		},
+	)
+
+	warning := widget.NewLabelWithStyle(
+		"IMPORTANT: This secret key will only be displayed once.\n"+
+			"Copy and securely store it now. You will not be able to retrieve it again.",
+		fyne.TextAlignLeading,
+		fyne.TextStyle{Bold: true},
+	)
+
+	encodedKeySection := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		showHideButton,
+		encodedKeyEntry,
+	)
+
+	copyButton := widget.NewButtonWithIcon(
+		"Copy Encoded Key",
+		theme.ContentCopyIcon(),
+		func() {
+			window.Clipboard().SetContent(encodedKey)
+
+			dialog.ShowInformation(
+				"Copied",
+				"Encoded key copied to clipboard. Store it securely.",
+				window,
+			)
+		},
+	)
+
+	content := container.NewVBox(
+		warning,
+		widget.NewSeparator(),
+		widget.NewLabel("Encoded Secret Key:"),
+		encodedKeySection,
+		copyButton,
+	)
+
+	secretDialog := dialog.NewCustom(
+		"Access Created Successfully",
+		"I've Saved My Key",
+		content,
+		window,
+	)
+
+	secretDialog.Resize(fyne.NewSize(520, 240))
+	secretDialog.Show()
 }

@@ -23,6 +23,7 @@ type Screen struct {
 func New(
 	window fyne.Window,
 	appDeps *app.Deps,
+	version string,
 	coreService *coreApp.Services,
 	sotService *rCoreSot.Service,
 	discoveryState *discovery.State,
@@ -107,6 +108,7 @@ func New(
 		sotScreen := sourceoftruth.New(
 			window,
 			appDeps,
+			version,
 			password.Text,
 			coreService,
 			sotService,

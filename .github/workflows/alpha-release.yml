@@ -124,6 +124,7 @@ jobs:
         with:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
+          version: ${{ needs.prepare.outputs.tag }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7

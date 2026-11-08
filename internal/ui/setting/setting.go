@@ -13,6 +13,7 @@ type Screen struct {
 
 func New(
 	window fyne.Window,
+	version string,
 	onChangePassword func(
 		currentPassword string,
 		newPassword string,
@@ -122,6 +123,14 @@ func New(
 		},
 	)
 
+	versionLabel := widget.NewLabel(
+		"Version " + version,
+	)
+	versionLabel.Alignment = fyne.TextAlignCenter
+	versionLabel.TextStyle = fyne.TextStyle{
+		Monospace: true,
+	}
+
 	content := container.NewVBox(
 		widget.NewLabelWithStyle(
 			"Change Master Password",
@@ -139,9 +148,17 @@ func New(
 		content,
 	)
 
+	footer := container.NewCenter(
+		versionLabel,
+	)
+
 	return &Screen{
-		Content: container.NewCenter(
-			formContainer,
+		Content: container.NewBorder(
+			nil,
+			footer,
+			nil,
+			nil,
+			container.NewCenter(formContainer),
 		),
 	}
 }

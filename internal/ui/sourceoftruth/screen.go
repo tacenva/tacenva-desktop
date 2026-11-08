@@ -17,7 +17,6 @@ import (
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-desktop/internal/ui/discovery"
-	"github.com/tacenva/tacenva-desktop/internal/util"
 	"github.com/tacenva/tacenva-services/api"
 	tacenvaserviceapp "github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/sourceoftruth"
@@ -50,6 +49,7 @@ type Screen struct {
 func New(
 	window fyne.Window,
 	appDeps *tacenvaserviceapp.Deps,
+	version string,
 	masterKey string,
 	coreServices *tacpassapp.Services,
 	sotService *sourceoftruth.Service,
@@ -172,6 +172,7 @@ func New(
 			window,
 			appDeps,
 			nodeContext,
+			version,
 			masterKey,
 			coreServices,
 			sotService,
@@ -568,10 +569,7 @@ func showForm(
 
 	// Show encoded.
 	if sot.Auth != nil && (sot.Auth.KeyPairOfAccessUnit.PublicKey != "" || sot.Auth.KeyPairOfAccessUnit.PrivateKey != "") {
-		secret, err := util.EncodeSecretKey(
-			sot.Auth.KeyPairOfAccessUnit.PublicKey,
-			sot.Auth.KeyPairOfAccessUnit.PrivateKey,
-		)
+		secret, err := sot.Auth.KeyPairOfAccessUnit.EncodedKey()
 		if err != nil {
 			dialog.ShowError(err, window)
 			return
@@ -653,7 +651,7 @@ func showForm(
 				return
 			}
 
-			pair, err := util.DecodeSecretKey(secretKeyEntry.Text)
+			pair, err := keyring.FromEncodedKey(secretKeyEntry.Text)
 			if err != nil {
 				dialog.ShowError(err, window)
 				return
