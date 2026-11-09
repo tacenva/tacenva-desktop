@@ -75,7 +75,7 @@ func New(
 	)
 
 	backButton := widget.NewButtonWithIcon(
-		context.SelectedSot.SotIdentity,
+		"Back",
 		theme.NavigateBackIcon(),
 		onBack,
 	)
@@ -183,12 +183,26 @@ func New(
 		)
 	}
 
+	sotIdentityLabel := widget.NewLabelWithStyle(
+		"Source of Truth: "+context.SelectedSot.SotIdentity,
+		fyne.TextAlignLeading,
+		fyne.TextStyle{Bold: true},
+	)
+
+	contentArea := container.NewBorder(
+		container.NewPadded(sotIdentityLabel),
+		nil,
+		nil,
+		nil,
+		container.NewPadded(mainContent),
+	)
+
 	body := container.NewBorder(
 		nil,
 		nil,
 		sidebar,
 		nil,
-		container.NewPadded(mainContent),
+		contentArea,
 	)
 
 	content := container.NewBorder(

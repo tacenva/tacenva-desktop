@@ -42,6 +42,8 @@ runs:
         GOARCH: ${{ inputs.goarch }}
         VERSION: ${{ inputs.version }}
       run: |
+        set -e
+
         mkdir -p dist
 
         NAME="tacenva-${GOOS}-${GOARCH}"
@@ -54,7 +56,12 @@ runs:
           export CGO_ENABLED=1
         fi
 
-        LDFLAGS="-s -w -X github.com/tacenva/tacenva/internal/app.Version=${VERSION}"
+        APP_PKG=$(go list -f '{{.ImportPath}}' ./internal/app)
+
+        echo "VERSION: ${VERSION}"
+        echo "APP_PKG: ${APP_PKG}"
+
+        LDFLAGS="-s -w -X ${APP_PKG}.Version=${VERSION}"
 
         if [ "$GOOS" = "windows" ]; then
           LDFLAGS="$LDFLAGS -H=windowsgui"
