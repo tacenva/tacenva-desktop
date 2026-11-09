@@ -14,6 +14,7 @@ import (
 
 	"github.com/tacenva/tacenva-core/contract"
 	"github.com/tacenva/tacenva-core/entity"
+	"github.com/tacenva/tacenva-core/util/keyring"
 	"github.com/tacenva/tacenva-services/app"
 	"github.com/tacenva/tacenva-services/app/accesscontrol"
 	coreApp "github.com/tacenva/tacpass-core/app"
@@ -23,6 +24,11 @@ type Screen struct {
 	Content fyne.CanvasObject
 	Reload  func()
 	window  fyne.Window
+}
+
+type GroupNavigationEntry struct {
+	Tree    *contract.AccessGroupTree
+	KeyPair *keyring.KeyPair
 }
 
 func New(
@@ -68,7 +74,7 @@ func New(
 	var refreshSelectedUnit func()
 
 	var selectedGroupTree *contract.AccessGroupTree
-	var navigationStack []*contract.AccessGroupTree
+	var navigationStack []GroupNavigationEntry
 	var selectedUnit *contract.AccessUnitWithUserCount
 
 	unitsByGroup := make(
@@ -117,12 +123,17 @@ func New(
 			}
 
 			navigationStack = navigationStack[:len(navigationStack)-1]
-			selectedGroupTree = navigationStack[len(navigationStack)-1]
 
-			// Sinkronkan selected group dengan service.
-			accesscontrolService.SetSelectedGroup(&selectedGroupTree.Group)
+			previous := navigationStack[len(navigationStack)-1]
 
-			units = unitsByGroup[selectedGroupTree.Group.ID]
+			selectedGroupTree = previous.Tree
+
+			accesscontrolService.SetSelectedGroup(
+				&previous.Tree.Group,
+				previous.KeyPair,
+			)
+
+			units = unitsByGroup[previous.Tree.Group.ID]
 
 			render()
 		},
@@ -177,6 +188,11 @@ func New(
 
 	openPanel := func() {
 		panelOpen = true
+		render()
+	}
+
+	closePanel := func() {
+		panelOpen = false
 		render()
 	}
 
@@ -976,17 +992,19 @@ func New(
 
 		groupID := group.Group.ID
 
-		// Cek apakah group sudah ada di navigation stack.
+		// Simpan parent sebelum request asynchronous.
+		parentTree := selectedGroupTree
+
+		// Cari apakah group sudah ada di navigation stack.
 		stackIndex := -1
 
-		for i, existing := range navigationStack {
-			if existing.Group.ID == groupID {
+		for i, entry := range navigationStack {
+			if entry.Tree.Group.ID == groupID {
 				stackIndex = i
 				break
 			}
 		}
 
-		// Tandai loading dan ambil data tree terbaru.
 		go func() {
 			result, err := accesscontrolService.GroupWithChildren(
 				&group.Group,
@@ -1007,27 +1025,91 @@ func New(
 					return
 				}
 
-				// Gunakan hasil terbaru dari GroupWithChildren.
-				selectedGroupTree = &result[0]
+				refreshedTree := &result[0]
 
-				accesscontrolService.SetSelectedGroup(
-					&selectedGroupTree.Group,
-				)
+				var selectedKeyPair *keyring.KeyPair
 
-				// Update navigation stack.
+				// Group sudah pernah dikunjungi.
 				if stackIndex >= 0 {
+					selectedKeyPair = navigationStack[stackIndex].KeyPair
+
 					navigationStack = navigationStack[:stackIndex+1]
-					navigationStack[stackIndex] = selectedGroupTree
-				} else {
+
+					navigationStack[stackIndex] = GroupNavigationEntry{
+						Tree:    refreshedTree,
+						KeyPair: selectedKeyPair,
+					}
+
+				} else if len(navigationStack) == 0 {
+					// Initial root group.
+					selectedKeyPair = context.SelectedSot.AccessGroup.KeyPair
+
 					navigationStack = append(
 						navigationStack,
-						selectedGroupTree,
+						GroupNavigationEntry{
+							Tree:    refreshedTree,
+							KeyPair: selectedKeyPair,
+						},
+					)
+
+				} else {
+					// Group baru, decrypt menggunakan wrapped key
+					// dari parent yang sedang aktif.
+					if parentTree == nil {
+						dialog.ShowError(
+							errors.New("parent group is not available"),
+							window,
+						)
+						return
+					}
+
+					wrappedChildKey := ""
+
+					for _, child := range parentTree.Children {
+						if child.ChildGroupID == groupID {
+							wrappedChildKey = child.WrappedChildKey
+							break
+						}
+					}
+
+					// if wrappedChildKey == "" {
+					// 	dialog.ShowError(
+					// 		errors.New("unaccessible group"),
+					// 		window,
+					// 	)
+					// 	return
+					// }
+
+					selectedKeyPair, err = accesscontrolService.KeyPairOfChild(
+						refreshedTree.Group.PublicKey,
+						wrappedChildKey,
+					)
+
+					if err != nil {
+						dialog.ShowError(err, window)
+						return
+					}
+
+					navigationStack = append(
+						navigationStack,
+						GroupNavigationEntry{
+							Tree:    refreshedTree,
+							KeyPair: selectedKeyPair,
+						},
 					)
 				}
 
+				selectedGroupTree = refreshedTree
+
+				accesscontrolService.SetSelectedGroup(
+					&selectedGroupTree.Group,
+					selectedKeyPair,
+				)
+
 				units = unitsByGroup[groupID]
 
-				render()
+				// render()
+				closePanel()
 
 				if _, exists := unitsByGroup[groupID]; !exists {
 					loadUnits(groupID)
@@ -1125,7 +1207,9 @@ func New(
 					selectedGroupTree = refreshedGroup
 
 					if len(navigationStack) > 0 {
-						navigationStack[len(navigationStack)-1] = refreshedGroup
+						lastIndex := len(navigationStack) - 1
+
+						navigationStack[lastIndex].Tree = refreshedGroup
 					}
 
 					delete(unitsByGroup, currentGroupID)

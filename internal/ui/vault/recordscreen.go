@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -512,14 +513,14 @@ func NewRecordScreen(
 				)
 			}
 
-			if record.RenewalDate.IsZero() {
+			if record.RenewalPeriod <= 0 || record.LastRenewedAt.IsZero() {
 				renewalDate.SetText("-")
 				renewalDate.Importance = widget.LowImportance
 				renewalDateIcon.SetResource(nil)
 			} else {
-				renewalDate.SetText(
-					record.RenewalDate.Format("02 Jan 2006"),
-				)
+				nextRenewal := record.LastRenewedAt.Add(record.RenewalPeriod)
+
+				renewalDate.SetText(nextRenewal.Format("02 Jan 2006"))
 
 				now := time.Now()
 				today := time.Date(
@@ -527,27 +528,30 @@ func NewRecordScreen(
 					now.Month(),
 					now.Day(),
 					0, 0, 0, 0,
-					now.Location(),
+					time.UTC,
 				)
 
-				renewal := record.RenewalDate.In(now.Location())
+				renewal := nextRenewal.In(now.Location())
 				renewalDay := time.Date(
 					renewal.Year(),
 					renewal.Month(),
 					renewal.Day(),
 					0, 0, 0, 0,
-					now.Location(),
+					time.UTC,
 				)
 
-				daysRemaining := int(renewalDay.Sub(today).Hours() / 24)
+				daysRemaining := int(renewalDay.Sub(today) / (24 * time.Hour))
 
-				if daysRemaining < 0 {
+				switch {
+				case daysRemaining < 0:
 					renewalDate.Importance = widget.DangerImportance
 					renewalDateIcon.SetResource(theme.ErrorIcon())
-				} else if daysRemaining <= 7 {
+
+				case daysRemaining <= 7:
 					renewalDate.Importance = widget.WarningImportance
 					renewalDateIcon.SetResource(theme.WarningIcon())
-				} else {
+
+				default:
 					renewalDate.Importance = widget.MediumImportance
 					renewalDateIcon.SetResource(nil)
 				}
@@ -677,11 +681,16 @@ func NewRecordScreen(
 			searchTimer.Stop()
 		}
 
+		recordsSnapshot := append(
+			[]tacpassentity.VaultRecord(nil),
+			allVaultRecords...,
+		)
+
 		searchTimer = time.AfterFunc(
 			200*time.Millisecond,
 			func() {
 				filtered := filterVaultRecords(
-					allVaultRecords,
+					recordsSnapshot,
 					query,
 				)
 
@@ -785,18 +794,32 @@ func showRecordForm(
 		nil, nil, nil, generatePasswordButton, passwordEntry,
 	)
 
-	renewalDateEntry := widget.NewDateEntry()
+	renewalPeriodEntry := widget.NewEntry()
+	renewalPeriodEntry.SetPlaceHolder("Leave empty to disable")
 
-	if !record.RenewalDate.IsZero() {
-		renewalDate := record.RenewalDate
-		renewalDateEntry.SetDate(&renewalDate)
+	renewalPeriodUnit := widget.NewLabel("days")
+	renewalPeriodUnit.TextStyle = fyne.TextStyle{
+		Italic: true,
+	}
+
+	renewalPeriodContainer := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		renewalPeriodUnit,
+		renewalPeriodEntry,
+	)
+
+	if record.RenewalPeriod > 0 {
+		days := int(record.RenewalPeriod / (24 * time.Hour))
+		renewalPeriodEntry.SetText(strconv.Itoa(days))
 	}
 
 	form := widget.NewForm(
 		widget.NewFormItem("Identifier", identifierEntry),
 		widget.NewFormItem("Endpoint", endpointEntry),
 		widget.NewFormItem("Password", passwordContainer),
-		widget.NewFormItem("Renewal Date", renewalDateEntry),
+		widget.NewFormItem("Renewal Period (days)", renewalPeriodContainer),
 	)
 
 	formContainer := container.NewGridWrap(
@@ -836,11 +859,44 @@ func showRecordForm(
 			record.Endpoint = endpoint
 			record.Password = password
 
-			if renewalDateEntry.Date == nil {
-				record.RenewalDate = time.Time{}
-			} else {
-				record.RenewalDate = *renewalDateEntry.Date
+			renewalPeriod := int64(0)
+
+			periodText := strings.TrimSpace(renewalPeriodEntry.Text)
+			if periodText != "" {
+				parsed, err := strconv.ParseInt(periodText, 10, 64)
+				if err != nil {
+					dialog.ShowInformation(
+						"Invalid Input",
+						"Renewal period must be a valid number of days.",
+						window,
+					)
+					return
+				}
+
+				if parsed < 0 {
+					dialog.ShowInformation(
+						"Invalid Input",
+						"Renewal period cannot be negative.",
+						window,
+					)
+					return
+				}
+
+				const maxRenewalDays = int64(106751)
+
+				if parsed > maxRenewalDays {
+					dialog.ShowInformation(
+						"Invalid Input",
+						"Renewal period is too large.",
+						window,
+					)
+					return
+				}
+
+				renewalPeriod = parsed
 			}
+
+			record.RenewalPeriod = time.Duration(renewalPeriod) * 24 * time.Hour
 
 			if onSave != nil {
 				onSave(&record)
