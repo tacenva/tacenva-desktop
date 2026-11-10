@@ -348,7 +348,11 @@ func New(
 							return vaultService.UpdateVault(updated)
 						},
 						func() {
-							dialog.ShowInformation("Success", "Vault berhasil diperbarui.", window)
+							dialog.ShowInformation(
+								"Success",
+								"Vault successfully updated.",
+								window,
+							)
 							reload()
 						},
 					)
@@ -371,7 +375,11 @@ func New(
 
 						currentBusy, currentLoading := getOperationState()
 						if currentBusy || currentLoading {
-							dialog.ShowInformation("Offline", "Koneksi tidak tersedia. Penghapusan dibatalkan.", window)
+							dialog.ShowInformation(
+								"Offline",
+								"Connection is unavailable. The deletion has been canceled.",
+								window,
+							)
 							return
 						}
 
@@ -381,7 +389,11 @@ func New(
 								return vaultService.DeleteVault(&selected)
 							},
 							func() {
-								dialog.ShowInformation("Success", "Vault berhasil dihapus.", window)
+								dialog.ShowInformation(
+									"Success",
+									"Vault successfully deleted.",
+									window,
+								)
 								reload()
 							},
 						)
@@ -409,7 +421,11 @@ func New(
 							return vaultService.CreateVault(newVault.Name, groupIDs)
 						},
 						func() {
-							dialog.ShowInformation("Success", "Vault berhasil dibuat.", window)
+							dialog.ShowInformation(
+								"Success",
+								"Vault successfully created.",
+								window,
+							)
 							reload()
 						},
 					)

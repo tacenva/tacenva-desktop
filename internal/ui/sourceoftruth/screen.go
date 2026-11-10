@@ -120,14 +120,18 @@ func New(
 				nodeContext.SelectedSot.Auth.Token,
 			)
 
+			fingerprint := ""
+
+			if nodeContext.SelectedSot.TLSFingerprint != nil {
+				fingerprint = *nodeContext.SelectedSot.TLSFingerprint
+			}
+
 			appDeps.Client.ConfigureTLS(
 				nodeContext.SelectedSot.Address,
 				api.TLSConfig{
-					Fingerprint: *nodeContext.SelectedSot.TLSFingerprint,
+					Fingerprint: fingerprint,
 
-					OnFirstTrust: func(
-						fingerprint string,
-					) error {
+					OnFirstTrust: func(fingerprint string) error {
 						nodeContext.SelectedSot.TLSFingerprint = &fingerprint
 
 						return sotService.Update(
@@ -168,7 +172,9 @@ func New(
 			coreServices.Vault.Sot.SetConfig(vaultDir)
 		}
 
-		nodeScreen := uiapp.New(
+		var nodeScreen *uiapp.Screen
+
+		nodeScreen = uiapp.New(
 			window,
 			appDeps,
 			nodeContext,
@@ -177,7 +183,11 @@ func New(
 			coreServices,
 			sotService,
 
-			onBack,
+			func() {
+				nodeScreen.Stop()
+
+				onBack()
+			},
 		)
 
 		return nodeScreen.Content, nil
@@ -512,6 +522,7 @@ func New(
 
 						appDeps.Client.ClearToken()
 						appDeps.Client.ClearTLS(selectedSot.Address)
+						appDeps.Client.SetReachable(false)
 
 						reload()
 					})
@@ -528,6 +539,10 @@ func New(
 				loading.Stop()
 
 				if err != nil {
+					appDeps.Client.ClearToken()
+					appDeps.Client.ClearTLS(selectedSot.Address)
+					appDeps.Client.SetReachable(false)
+
 					window.SetContent(previousContent)
 					dialog.ShowError(err, window)
 					return

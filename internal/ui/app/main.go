@@ -1,6 +1,7 @@
 package app
 
 import (
+	stdcontext "context"
 	"image/color"
 	"math/rand"
 	"time"
@@ -31,6 +32,8 @@ type Screen struct {
 	isAdmin             bool
 
 	Context *app.Context
+
+	cancelReachability stdcontext.CancelFunc
 }
 
 func New(
@@ -43,6 +46,25 @@ func New(
 	sotService *sourceoftruth.Service,
 	onBack func(),
 ) *Screen {
+	healthService := health.NewService(
+		appDeps,
+		context,
+	)
+
+	// Create a cancellable context only for remote nodes.
+	var watcherContext stdcontext.Context
+	var cancelWatcher stdcontext.CancelFunc
+
+	if context.IsRemote {
+		watcherContext, cancelWatcher = stdcontext.WithCancel(
+			stdcontext.Background(),
+		)
+
+		// Complete the initial health check before creating the vault screen.
+		// vault.New() immediately starts the initial vault list request.
+		healthService.CheckReachabilityContext(watcherContext)
+	}
+
 	vaultScreen := vault.New(
 		window,
 		appDeps,
@@ -81,7 +103,10 @@ func New(
 	)
 
 	statusCircle := canvas.NewCircle(color.NRGBA{
-		R: 220, G: 53, B: 69, A: 255,
+		R: 220,
+		G: 53,
+		B: 69,
+		A: 255,
 	})
 	statusCircle.Resize(fyne.NewSize(10, 10))
 
@@ -223,18 +248,31 @@ func New(
 		accessControlScreen: acScreen,
 		isAdmin:             isAdmin,
 
-		Context: context,
+		Context:            context,
+		cancelReachability: cancelWatcher,
 	}
 
+	showVault()
+
 	if context.IsRemote {
-		healthService := health.NewService(
-			appDeps,
-			context,
+		// Display the result of the initial health check.
+		screen.updateReachabilityUI(
+			watcherContext,
+			healthService.IsReachable(),
+			false,
 		)
 
+		// Configure the initial polling interval.
+		if healthService.IsReachable() {
+			appDeps.Client.SetAdaptiveInterval(60 * time.Second)
+		} else {
+			appDeps.Client.SetAdaptiveInterval(5 * time.Second)
+		}
+
+		// Start the background reachability watcher.
 		go screen.watchReachability(
-			healthService.CheckReachability,
-			appDeps.Client.IsReachable,
+			watcherContext,
+			healthService,
 			appDeps.Client.SetAdaptiveInterval,
 			appDeps.Client.AdaptiveInterval,
 		)
@@ -243,55 +281,111 @@ func New(
 	return screen
 }
 
+// Stop cancels the reachability watcher when the node screen is closed.
+func (s *Screen) Stop() {
+	if s.cancelReachability != nil {
+		s.cancelReachability()
+		s.cancelReachability = nil
+	}
+}
+
+// updateReachabilityUI updates the connection indicator on the Fyne UI thread.
+func (s *Screen) updateReachabilityUI(
+	ctx stdcontext.Context,
+	reachable bool,
+	reconnected bool,
+) {
+	fyne.Do(func() {
+		// Ignore queued UI updates after the watcher has been stopped.
+		if ctx.Err() != nil {
+			return
+		}
+
+		if reachable {
+			s.statusCircle.FillColor = color.NRGBA{
+				R: 46,
+				G: 160,
+				B: 67,
+				A: 255,
+			}
+			s.statusLabel.SetText("Connected")
+		} else {
+			s.statusCircle.FillColor = color.NRGBA{
+				R: 220,
+				G: 53,
+				B: 69,
+				A: 255,
+			}
+			s.statusLabel.SetText("Disconnected...")
+		}
+
+		if s.accessControlItem != nil {
+			s.accessControlItem.SetDisabled(
+				!reachable || !s.isAdmin,
+			)
+		}
+
+		s.statusCircle.Refresh()
+		s.statusLabel.Refresh()
+
+		if reconnected &&
+			s.isAdmin &&
+			s.accessControlScreen != nil &&
+			s.accessControlScreen.Reload != nil {
+			s.accessControlScreen.Reload()
+		}
+	})
+}
+
+// watchReachability periodically checks the remote node connection status.
 func (s *Screen) watchReachability(
-	check func(),
-	getReachable func() bool,
+	ctx stdcontext.Context,
+	healthService *health.Service,
 	setAdaptiveInterval func(time.Duration),
 	getAdaptiveInterval func() time.Duration,
 ) {
 	failures := 0
-	hasPreviousStatus := false
-	wasReachable := false
+	wasReachable := healthService.IsReachable()
 
 	for {
-		check()
-		reachable := getReachable()
+		interval := getAdaptiveInterval()
+		if interval <= 0 {
+			interval = 5 * time.Second
+		}
 
-		reconnected := hasPreviousStatus && reachable && !wasReachable
+		// Add a small random jitter to avoid synchronized polling.
+		jitterRange := int64(interval / 5)
+		var jitter time.Duration
+
+		if jitterRange > 0 {
+			jitter = time.Duration(rand.Int63n(jitterRange+1)) -
+				interval/10
+		}
+
+		timer := time.NewTimer(interval + jitter)
+
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Use the cancellable context for the health check request.
+		healthService.CheckReachabilityContext(ctx)
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		reachable := healthService.IsReachable()
+		reconnected := reachable && !wasReachable
 
 		wasReachable = reachable
-		hasPreviousStatus = true
-
-		fyne.Do(func() {
-			if reachable {
-				s.statusCircle.FillColor = color.NRGBA{
-					R: 46, G: 160, B: 67, A: 255,
-				}
-				s.statusLabel.SetText("Connected")
-			} else {
-				s.statusCircle.FillColor = color.NRGBA{
-					R: 220, G: 53, B: 69, A: 255,
-				}
-				s.statusLabel.SetText("Disconnected...")
-			}
-
-			if s.accessControlItem != nil {
-				s.accessControlItem.SetDisabled(
-					!reachable || !s.isAdmin,
-				)
-			}
-
-			s.statusCircle.Refresh()
-			s.statusLabel.Refresh()
-
-			// Reload hanya saat koneksi pulih.
-			if reconnected &&
-				s.isAdmin &&
-				s.accessControlScreen != nil &&
-				s.accessControlScreen.Reload != nil {
-				s.accessControlScreen.Reload()
-			}
-		})
 
 		if reachable {
 			failures = 0
@@ -309,14 +403,10 @@ func (s *Screen) watchReachability(
 			}
 		}
 
-		interval := getAdaptiveInterval()
-		if interval <= 0 {
-			interval = 5 * time.Second
-		}
-
-		jitter := time.Duration(rand.Int63n(int64(interval/5)+1)) -
-			interval/10
-
-		time.Sleep(interval + jitter)
+		s.updateReachabilityUI(
+			ctx,
+			reachable,
+			reconnected,
+		)
 	}
 }
