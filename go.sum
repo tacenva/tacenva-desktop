@@ -81,8 +81,8 @@ github.com/tacenva/database v1.0.0-alpha.5 h1:w+8cLph/bUJf27SaPMPYk8gCIPwPEs80VE
 github.com/tacenva/database v1.0.0-alpha.5/go.mod h1:UPFLkwRDCP0m3pad2TpMZeJqk1F7bW0EQc1JUn3lOGs=
 github.com/tacenva/tacenva-core v1.0.0-alpha.4 h1:U5Ou3SG86FmVcKnUYQwezNj60iYcurlO4Jwwrd30ZxU=
 github.com/tacenva/tacenva-core v1.0.0-alpha.4/go.mod h1:RdA4NftH0S2P5sdusJ2Lh0bvriXVrG07C3k8G06UDrg=
-github.com/tacenva/tacenva-services v1.0.0-alpha.9 h1:xmvwa9fkPSKwi1j5/4/bTY02hZjfsxC5I4LxhKGGnA4=
-github.com/tacenva/tacenva-services v1.0.0-alpha.9/go.mod h1:1i8lqpiK/9ppWwzqUt4y1Vz98ptJoppmlPlY6jE8Myc=
+github.com/tacenva/tacenva-services v1.0.0-alpha.10 h1:nG5oMlktz77/1ImrgJKzNa8FFDsWXfeS2IDxU3z351g=
+github.com/tacenva/tacenva-services v1.0.0-alpha.10/go.mod h1:1i8lqpiK/9ppWwzqUt4y1Vz98ptJoppmlPlY6jE8Myc=
 github.com/tacenva/tacpass-core v1.0.0-alpha.9 h1:iaTPr5o4tr7/1njC+Eo6/wR20lbMQxK11Vd/ogzO/Oo=
 github.com/tacenva/tacpass-core v1.0.0-alpha.9/go.mod h1:HTLI1rwQ3ewN3tsK1J4rx91TP+2QIN070iGb6741ks4=
 github.com/yuin/goldmark v1.8.2 h1:kEGpgqJXdgbkhcOgBxkC0X0PmoPG1ZyoZ117rDVp4zE=
