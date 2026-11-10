@@ -12,7 +12,6 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/tacenva/tacenva-core/debug"
 	tacenvaentity "github.com/tacenva/tacenva-core/entity"
 	"github.com/tacenva/tacenva-desktop/internal/ui/loading"
 	"github.com/tacenva/tacenva-services/app"
@@ -646,7 +645,7 @@ func showForm(
 				}
 
 				groups = updatedGroups
-				debug.LogJSON("updated groups", updatedGroups)
+				// debug.LogJSON("updated groups", updatedGroups)
 				updateGroupList(searchEntry.Text)
 			})
 		}()

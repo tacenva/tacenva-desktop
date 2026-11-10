@@ -991,11 +991,14 @@ func New(
 		selectedUnit = nil
 
 		groupID := group.Group.ID
+		isInitialGroup := len(navigationStack) == 0
 
-		// Simpan parent sebelum request asynchronous.
+		if groupID == "" {
+			groupID = context.SelectedSot.AccessGroup.ID
+		}
+
 		parentTree := selectedGroupTree
 
-		// Cari apakah group sudah ada di navigation stack.
 		stackIndex := -1
 
 		for i, entry := range navigationStack {
@@ -1006,9 +1009,7 @@ func New(
 		}
 
 		go func() {
-			result, err := accesscontrolService.GroupWithChildren(
-				&group.Group,
-			)
+			result, err := accesscontrolService.GroupWithChildren(groupID)
 
 			fyne.Do(func() {
 				if err != nil {
@@ -1029,7 +1030,6 @@ func New(
 
 				var selectedKeyPair *keyring.KeyPair
 
-				// Group sudah pernah dikunjungi.
 				if stackIndex >= 0 {
 					selectedKeyPair = navigationStack[stackIndex].KeyPair
 
@@ -1040,8 +1040,7 @@ func New(
 						KeyPair: selectedKeyPair,
 					}
 
-				} else if len(navigationStack) == 0 {
-					// Initial root group.
+				} else if isInitialGroup {
 					selectedKeyPair = context.SelectedSot.AccessGroup.KeyPair
 
 					navigationStack = append(
@@ -1053,8 +1052,6 @@ func New(
 					)
 
 				} else {
-					// Group baru, decrypt menggunakan wrapped key
-					// dari parent yang sedang aktif.
 					if parentTree == nil {
 						dialog.ShowError(
 							errors.New("parent group is not available"),
@@ -1071,14 +1068,6 @@ func New(
 							break
 						}
 					}
-
-					// if wrappedChildKey == "" {
-					// 	dialog.ShowError(
-					// 		errors.New("unaccessible group"),
-					// 		window,
-					// 	)
-					// 	return
-					// }
 
 					selectedKeyPair, err = accesscontrolService.KeyPairOfChild(
 						refreshedTree.Group.PublicKey,
@@ -1108,7 +1097,6 @@ func New(
 
 				units = unitsByGroup[groupID]
 
-				// render()
 				closePanel()
 
 				if _, exists := unitsByGroup[groupID]; !exists {
@@ -1134,19 +1122,29 @@ func New(
 		groupContainer.Refresh()
 
 		currentGroupID := ""
+
 		if selectedGroupTree != nil {
 			currentGroupID = selectedGroupTree.Group.ID
 		}
 
+		// Initial load langsung masuk ke selectGroup.
+		// Tidak melakukan GroupWithChildren di sini.
+		if currentGroupID == "" {
+			navigationStack = nil
+			selectedGroupTree = nil
+
+			selectGroup(&contract.AccessGroupTree{
+				Group: entity.AccessGroup{
+					ID: context.SelectedSot.AccessGroup.ID,
+				},
+			})
+
+			return
+		}
+
 		go func() {
-			var parentGroup *entity.AccessGroup
-
-			if selectedGroupTree != nil {
-				parentGroup = &selectedGroupTree.Group
-			}
-
 			result, err := accesscontrolService.GroupWithChildren(
-				parentGroup,
+				currentGroupID,
 			)
 
 			fyne.Do(func() {
@@ -1183,14 +1181,8 @@ func New(
 					}
 
 					unitContainer.Refresh()
-					updateLayout()
-					return
-				}
 
-				if currentGroupID == "" || selectedGroupTree == nil {
-					navigationStack = nil
-					selectedGroupTree = nil
-					selectGroup(&groupTree[0])
+					updateLayout()
 					return
 				}
 
