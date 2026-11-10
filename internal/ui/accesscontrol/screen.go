@@ -451,7 +451,7 @@ func New(
 		isCreate := accessUnit.ID == ""
 
 		unitCopy := *accessUnit
-		encodedKey := ""
+		var createResult *accesscontrol.CreateUnitResult
 
 		if isCreate {
 			unitCopy.GroupID = groupID
@@ -466,11 +466,20 @@ func New(
 				if isCreate {
 					var err error
 
-					encodedKey, err = accesscontrolService.CreateUnit(
+					createResult, err = accesscontrolService.CreateUnit(
 						&unitCopy,
 					)
+					if err != nil {
+						return err
+					}
 
-					return err
+					if createResult == nil || createResult.AccessUnit == nil {
+						return errors.New("invalid create access unit response")
+					}
+
+					unitCopy = *createResult.AccessUnit
+
+					return nil
 				}
 
 				return accesscontrolService.UpdateUnit(&unitCopy)
@@ -516,7 +525,10 @@ func New(
 				render()
 
 				if isCreate {
-					showSecretKeyDialog(window, encodedKey)
+					showSecretKeyDialog(
+						window,
+						createResult.EncodedKey,
+					)
 				} else {
 					dialog.ShowInformation(
 						"Success",

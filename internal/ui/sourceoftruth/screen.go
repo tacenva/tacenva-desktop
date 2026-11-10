@@ -522,10 +522,10 @@ func New(
 
 						appDeps.Client.ClearToken()
 						appDeps.Client.ClearTLS(selectedSot.Address)
-						appDeps.Client.SetReachable(
-							selectedSot.Address,
-							false,
-						)
+						// appDeps.Client.SetReachable(
+						// 	selectedSot.Address,
+						// 	false,
+						// )
 
 						reload()
 					})
@@ -544,10 +544,10 @@ func New(
 				if err != nil {
 					appDeps.Client.ClearToken()
 					appDeps.Client.ClearTLS(selectedSot.Address)
-					appDeps.Client.SetReachable(
-						selectedSot.Address,
-						false,
-					)
+					// appDeps.Client.SetReachable(
+					// 	selectedSot.Address,
+					// 	false,
+					// )
 
 					window.SetContent(previousContent)
 					dialog.ShowError(err, window)
