@@ -256,7 +256,7 @@ func NewRecordScreen(
 				func() {
 					dialog.ShowInformation(
 						"Success",
-						"Records berhasil disinkronkan.",
+						"Records synchronized successfully.",
 						window,
 					)
 					reload()
@@ -290,7 +290,7 @@ func NewRecordScreen(
 							func() {
 								dialog.ShowInformation(
 									"Success",
-									"Record berhasil dibuat.",
+									"Record created successfully.",
 									window,
 								)
 								reload()
@@ -597,7 +597,7 @@ func NewRecordScreen(
 							func() {
 								dialog.ShowInformation(
 									"Success",
-									"Record berhasil diperbarui.",
+									"Record updated successfully.",
 									window,
 								)
 								reload()
@@ -624,7 +624,7 @@ func NewRecordScreen(
 						if isBusy() || isListLoading() {
 							dialog.ShowInformation(
 								"Offline",
-								"Koneksi tidak tersedia. Penghapusan dibatalkan.",
+								"Connection is unavailable. The deletion has been canceled.",
 								window,
 							)
 							return
@@ -641,7 +641,7 @@ func NewRecordScreen(
 							func() {
 								dialog.ShowInformation(
 									"Success",
-									"Record berhasil dihapus.",
+									"Record deleted successfully.",
 									window,
 								)
 								reload()
