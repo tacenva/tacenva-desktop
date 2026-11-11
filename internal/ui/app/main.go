@@ -3,7 +3,6 @@ package app
 import (
 	stdcontext "context"
 	"image/color"
-	"math/rand"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -273,8 +272,6 @@ func New(
 		go screen.watchReachability(
 			watcherContext,
 			healthService,
-			appDeps.Client.SetAdaptiveInterval,
-			appDeps.Client.AdaptiveInterval,
 		)
 	}
 
@@ -284,6 +281,8 @@ func New(
 // Stop cancels the reachability watcher when the node screen is closed.
 func (s *Screen) Stop() {
 	if s.cancelReachability != nil {
+		// log.Println("[REACHABILITY] stopping watcher")
+
 		s.cancelReachability()
 		s.cancelReachability = nil
 	}
@@ -341,33 +340,28 @@ func (s *Screen) updateReachabilityUI(
 func (s *Screen) watchReachability(
 	ctx stdcontext.Context,
 	healthService *health.Service,
-	setAdaptiveInterval func(time.Duration),
-	getAdaptiveInterval func() time.Duration,
 ) {
+	// defer log.Println("[REACHABILITY] watcher stopped")
+
+	// log.Println("[REACHABILITY] watcher started")
+
 	failures := 0
 	wasReachable := healthService.IsReachable()
 
+	interval := 5 * time.Second
+
+	if wasReachable {
+		interval = 60 * time.Second
+	}
+
 	for {
-		interval := getAdaptiveInterval()
-		if interval <= 0 {
-			interval = 5 * time.Second
-		}
-
-		// Add a small random jitter to avoid synchronized polling.
-		jitterRange := int64(interval / 5)
-		var jitter time.Duration
-
-		if jitterRange > 0 {
-			jitter = time.Duration(rand.Int63n(jitterRange+1)) -
-				interval/10
-		}
-
-		timer := time.NewTimer(interval + jitter)
+		timer := time.NewTimer(interval)
 
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
+
 		case <-timer.C:
 		}
 
@@ -375,7 +369,6 @@ func (s *Screen) watchReachability(
 			return
 		}
 
-		// Use the cancellable context for the health check request.
 		healthService.CheckReachabilityContext(ctx)
 
 		if ctx.Err() != nil {
@@ -389,17 +382,17 @@ func (s *Screen) watchReachability(
 
 		if reachable {
 			failures = 0
-			setAdaptiveInterval(60 * time.Second)
+			interval = 60 * time.Second
 		} else {
 			failures++
 
 			switch failures {
 			case 1:
-				setAdaptiveInterval(5 * time.Second)
+				interval = 5 * time.Second
 			case 2:
-				setAdaptiveInterval(10 * time.Second)
+				interval = 10 * time.Second
 			default:
-				setAdaptiveInterval(20 * time.Second)
+				interval = 20 * time.Second
 			}
 		}
 
