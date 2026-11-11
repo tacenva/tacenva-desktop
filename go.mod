@@ -6,8 +6,8 @@ require (
 	fyne.io/fyne/v2 v2.8.2
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/tacenva/database v1.0.0-alpha.5
-	github.com/tacenva/tacenva-core v1.0.0-alpha.4
-	github.com/tacenva/tacenva-services v1.0.0-alpha.11
+	github.com/tacenva/tacenva-core v1.0.0-alpha.5
+	github.com/tacenva/tacenva-services v1.0.0-alpha.12
 	github.com/tacenva/tacpass-core v1.0.0-alpha.9
 )
 

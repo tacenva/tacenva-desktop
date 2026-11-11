@@ -79,10 +79,10 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tacenva/database v1.0.0-alpha.5 h1:w+8cLph/bUJf27SaPMPYk8gCIPwPEs80VErC1q5tFUY=
 github.com/tacenva/database v1.0.0-alpha.5/go.mod h1:UPFLkwRDCP0m3pad2TpMZeJqk1F7bW0EQc1JUn3lOGs=
-github.com/tacenva/tacenva-core v1.0.0-alpha.4 h1:U5Ou3SG86FmVcKnUYQwezNj60iYcurlO4Jwwrd30ZxU=
-github.com/tacenva/tacenva-core v1.0.0-alpha.4/go.mod h1:RdA4NftH0S2P5sdusJ2Lh0bvriXVrG07C3k8G06UDrg=
-github.com/tacenva/tacenva-services v1.0.0-alpha.11 h1:mX7ctZSdltM8WsV8bML4dppxj1fbCygEwPnJ9Cegthc=
-github.com/tacenva/tacenva-services v1.0.0-alpha.11/go.mod h1:1i8lqpiK/9ppWwzqUt4y1Vz98ptJoppmlPlY6jE8Myc=
+github.com/tacenva/tacenva-core v1.0.0-alpha.5 h1:X0mCzBlutcJv0Q+U+0ymW665uTrb3q4ftMcdjLusLfk=
+github.com/tacenva/tacenva-core v1.0.0-alpha.5/go.mod h1:RdA4NftH0S2P5sdusJ2Lh0bvriXVrG07C3k8G06UDrg=
+github.com/tacenva/tacenva-services v1.0.0-alpha.12 h1:IvM5qA4YpHv+oXW5r0/aScr1eRQxV58t954ioK90G7k=
+github.com/tacenva/tacenva-services v1.0.0-alpha.12/go.mod h1:25EL4yzONPjBo7MhJgQVOOwiTo9RCtOzIvhGQuFR5vs=
 github.com/tacenva/tacpass-core v1.0.0-alpha.9 h1:iaTPr5o4tr7/1njC+Eo6/wR20lbMQxK11Vd/ogzO/Oo=
 github.com/tacenva/tacpass-core v1.0.0-alpha.9/go.mod h1:HTLI1rwQ3ewN3tsK1J4rx91TP+2QIN070iGb6741ks4=
 github.com/yuin/goldmark v1.8.2 h1:kEGpgqJXdgbkhcOgBxkC0X0PmoPG1ZyoZ117rDVp4zE=
