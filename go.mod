@@ -7,7 +7,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/tacenva/database v1.0.0-alpha.5
 	github.com/tacenva/tacenva-core v1.0.0-alpha.6
-	github.com/tacenva/tacenva-services v1.0.0-alpha.13
+	github.com/tacenva/tacenva-services v1.0.0-alpha.14
 	github.com/tacenva/tacpass-core v1.0.0-alpha.9
 )
 
