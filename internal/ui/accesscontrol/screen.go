@@ -158,8 +158,9 @@ func New(
 		pageSubtitle,
 	)
 
-	normalMainContent := container.NewPadded(
-		container.NewScroll(
+	normalScroll := container.NewScroll(
+		container.New(
+			minWidthLayout{minWidth: 680},
 			container.NewVBox(
 				header,
 				widget.NewSeparator(),
@@ -167,6 +168,7 @@ func New(
 			),
 		),
 	)
+	normalMainContent := container.NewPadded(normalScroll)
 
 	var mainContent fyne.CanvasObject = normalMainContent
 
@@ -860,12 +862,17 @@ func New(
 
 			// Tampilan Users tidak menggunakan Scroll halaman luar.
 			mainContent = container.NewPadded(
-				container.NewBorder(
-					header,
-					nil,
-					nil,
-					nil,
-					userContent,
+				container.NewHScroll(
+					container.New(
+						minWidthLayout{minWidth: 720},
+						container.NewBorder(
+							header,
+							nil,
+							nil,
+							nil,
+							userContent,
+						),
+					),
 				),
 			)
 
@@ -1400,4 +1407,32 @@ func showSecretKeyDialog(
 
 	secretDialog.Resize(fyne.NewSize(520, 240))
 	secretDialog.Show()
+}
+
+type minWidthLayout struct {
+	minWidth float32
+}
+
+func (m minWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	var maxH, maxW float32
+	for _, o := range objects {
+		s := o.MinSize()
+		if s.Width > maxW {
+			maxW = s.Width
+		}
+		if s.Height > maxH {
+			maxH = s.Height
+		}
+	}
+	if maxW < m.minWidth {
+		maxW = m.minWidth
+	}
+	return fyne.NewSize(maxW, maxH)
+}
+
+func (m minWidthLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	for _, o := range objects {
+		o.Resize(size)
+		o.Move(fyne.NewPos(0, 0))
+	}
 }
