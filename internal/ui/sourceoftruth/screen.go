@@ -201,6 +201,9 @@ func New(
 			identity := widget.NewLabel("")
 			address := widget.NewLabel("")
 
+			identity.Wrapping = fyne.TextWrapBreak
+			address.Wrapping = fyne.TextWrapBreak
+
 			identity.TextStyle = fyne.TextStyle{
 				Bold: true,
 			}
@@ -217,9 +220,12 @@ func New(
 				nil,
 			)
 
-			actions := container.NewHBox(
-				editButton,
-				deleteButton,
+			// Wrap HBox in NewVBox so edit/delete buttons stay at a fixed natural height
+			actions := container.NewVBox(
+				container.NewHBox(
+					editButton,
+					deleteButton,
+				),
 			)
 
 			identityCell := container.NewBorder(
@@ -260,18 +266,56 @@ func New(
 
 			selectedSot := sotList[id]
 
-			row := obj.(*fyne.Container)
+			row, ok := obj.(*fyne.Container)
+			if !ok || len(row.Objects) < 3 {
+				return
+			}
 
-			identityCell := row.Objects[0].(*fyne.Container)
-			addressCell := row.Objects[1].(*fyne.Container)
-			actionCell := row.Objects[2].(*fyne.Container)
+			identityCell, ok := row.Objects[0].(*fyne.Container)
+			if !ok || len(identityCell.Objects) == 0 {
+				return
+			}
 
-			identity := identityCell.Objects[0].(*widget.Label)
-			address := addressCell.Objects[0].(*widget.Label)
-			actions := actionCell.Objects[0].(*fyne.Container)
+			addressCell, ok := row.Objects[1].(*fyne.Container)
+			if !ok || len(addressCell.Objects) == 0 {
+				return
+			}
 
-			editButton := actions.Objects[0].(*widget.Button)
-			deleteButton := actions.Objects[1].(*widget.Button)
+			actionCell, ok := row.Objects[2].(*fyne.Container)
+			if !ok || len(actionCell.Objects) == 0 {
+				return
+			}
+
+			identity, ok := identityCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			address, ok := addressCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			// Unwrap the outer VBox first, then grab the HBox inside it
+			actionsBox, ok := actionCell.Objects[0].(*fyne.Container)
+			if !ok || len(actionsBox.Objects) == 0 {
+				return
+			}
+
+			actions, ok := actionsBox.Objects[0].(*fyne.Container)
+			if !ok || len(actions.Objects) < 2 {
+				return
+			}
+
+			editButton, ok := actions.Objects[0].(*widget.Button)
+			if !ok {
+				return
+			}
+
+			deleteButton, ok := actions.Objects[1].(*widget.Button)
+			if !ok {
+				return
+			}
 
 			identity.SetText(selectedSot.SotIdentity)
 			address.SetText(selectedSot.Address)
@@ -321,6 +365,9 @@ func New(
 					},
 				)
 			}
+
+			obj.Refresh()
+			list.SetItemHeight(id, obj.MinSize().Height)
 		},
 	)
 

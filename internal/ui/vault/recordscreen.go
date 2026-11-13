@@ -312,6 +312,9 @@ func NewRecordScreen(
 			password := widget.NewLabel(hiddenPassword)
 			renewalDate := widget.NewLabel("")
 
+			identifier.Wrapping = fyne.TextWrapBreak
+			endpoint.Wrapping = fyne.TextWrapBreak
+
 			identifier.TextStyle = fyne.TextStyle{Bold: true}
 			renewalDate.TextStyle = fyne.TextStyle{Italic: true}
 
@@ -321,8 +324,9 @@ func NewRecordScreen(
 				nil,
 			)
 
+			// 1. Changed NewPadded -> NewVBox so copyButton stays fixed height
 			passwordCell := container.NewBorder(
-				nil, nil, nil, copyButton, password,
+				nil, nil, nil, container.NewVBox(copyButton), password,
 			)
 
 			identifierCell := container.NewBorder(
@@ -367,9 +371,12 @@ func NewRecordScreen(
 				nil,
 			)
 
-			actions := container.NewHBox(
-				updateButton,
-				deleteButton,
+			// 2. Changed NewPadded -> NewVBox so update/delete buttons stay fixed height
+			actions := container.NewVBox(
+				container.NewHBox(
+					updateButton,
+					deleteButton,
+				),
 			)
 
 			actionCell := container.NewBorder(
@@ -450,7 +457,12 @@ func NewRecordScreen(
 				return
 			}
 
-			copyButton, ok := passwordCell.Objects[1].(*widget.Button)
+			copyBox, ok := passwordCell.Objects[1].(*fyne.Container)
+			if !ok || len(copyBox.Objects) == 0 {
+				return
+			}
+
+			copyButton, ok := copyBox.Objects[0].(*widget.Button)
 			if !ok {
 				return
 			}
@@ -483,7 +495,13 @@ func NewRecordScreen(
 					return
 				}
 
-				actions, ok := actionCell.Objects[0].(*fyne.Container)
+				// 3. Unwrap the outer VBox first, then grab the HBox inside it!
+				actionsBox, ok := actionCell.Objects[0].(*fyne.Container)
+				if !ok || len(actionsBox.Objects) == 0 {
+					return
+				}
+
+				actions, ok := actionsBox.Objects[0].(*fyne.Container)
 				if !ok || len(actions.Objects) < 2 {
 					return
 				}
@@ -561,6 +579,8 @@ func NewRecordScreen(
 			renewalDateIcon.Refresh()
 
 			if !isWriter {
+				obj.Refresh()
+				entryList.SetItemHeight(id, obj.MinSize().Height)
 				return
 			}
 
@@ -651,6 +671,9 @@ func NewRecordScreen(
 					window,
 				)
 			}
+
+			obj.Refresh()
+			entryList.SetItemHeight(id, obj.MinSize().Height)
 		},
 	)
 

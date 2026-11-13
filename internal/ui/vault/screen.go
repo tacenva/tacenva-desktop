@@ -268,30 +268,29 @@ func New(
 			updatedAt := widget.NewLabel("")
 			updatedAt.TextStyle = fyne.TextStyle{Italic: true}
 
-			var updateButton *widget.Button
-			var deleteButton *widget.Button
-
-			if isWriter {
-				updateButton = widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), nil)
-				deleteButton = widget.NewButtonWithIcon("", theme.DeleteIcon(), nil)
-			} else {
-				updateButton = widget.NewButton("", nil)
-				deleteButton = widget.NewButton("", nil)
-				updateButton.Hide()
-				deleteButton.Hide()
-			}
+			name.Wrapping = fyne.TextWrapBreak
 
 			nameCell := container.NewBorder(nil, nil, nil, nil, name)
 			dateCell := container.NewBorder(nil, nil, nil, nil, updatedAt)
 
-			if isWriter {
-				actions := container.NewHBox(updateButton, deleteButton)
-				actionCell := container.NewBorder(nil, nil, nil, actions, nil)
-
-				return container.NewGridWithColumns(3, nameCell, dateCell, actionCell)
+			if !isWriter {
+				return container.NewGridWithColumns(2, nameCell, dateCell)
 			}
 
-			return container.NewGridWithColumns(2, nameCell, dateCell)
+			updateButton := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), nil)
+			deleteButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), nil)
+
+			// Wrap HBox in NewVBox so update/delete buttons stay at a fixed natural height
+			actions := container.NewVBox(
+				container.NewHBox(
+					updateButton,
+					deleteButton,
+				),
+			)
+
+			actionCell := container.NewBorder(nil, nil, nil, actions, nil)
+
+			return container.NewGridWithColumns(3, nameCell, dateCell, actionCell)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
 			if id < 0 || id >= len(filteredVaults) {
@@ -299,26 +298,70 @@ func New(
 			}
 
 			selected := filteredVaults[id]
-			row := obj.(*fyne.Container)
 
-			nameCell := row.Objects[0].(*fyne.Container)
-			dateCell := row.Objects[1].(*fyne.Container)
+			row, ok := obj.(*fyne.Container)
+			if !ok || len(row.Objects) < 2 {
+				return
+			}
 
-			name := nameCell.Objects[0].(*widget.Label)
-			updatedAt := dateCell.Objects[0].(*widget.Label)
+			nameCell, ok := row.Objects[0].(*fyne.Container)
+			if !ok || len(nameCell.Objects) == 0 {
+				return
+			}
+
+			dateCell, ok := row.Objects[1].(*fyne.Container)
+			if !ok || len(dateCell.Objects) == 0 {
+				return
+			}
+
+			name, ok := nameCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			updatedAt, ok := dateCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
 
 			name.SetText(selected.Name)
 			updatedAt.SetText(selected.UpdatedAt.Format("02 Jan 2006 15:04"))
 
 			if !isWriter {
+				obj.Refresh()
+				entryList.SetItemHeight(id, obj.MinSize().Height)
 				return
 			}
 
-			actionCell := row.Objects[2].(*fyne.Container)
-			actions := actionCell.Objects[0].(*fyne.Container)
+			if len(row.Objects) < 3 {
+				return
+			}
 
-			updateButton := actions.Objects[0].(*widget.Button)
-			deleteButton := actions.Objects[1].(*widget.Button)
+			actionCell, ok := row.Objects[2].(*fyne.Container)
+			if !ok || len(actionCell.Objects) == 0 {
+				return
+			}
+
+			// Unwrap the outer VBox first, then grab the HBox inside it
+			actionsBox, ok := actionCell.Objects[0].(*fyne.Container)
+			if !ok || len(actionsBox.Objects) == 0 {
+				return
+			}
+
+			actions, ok := actionsBox.Objects[0].(*fyne.Container)
+			if !ok || len(actions.Objects) < 2 {
+				return
+			}
+
+			updateButton, ok := actions.Objects[0].(*widget.Button)
+			if !ok {
+				return
+			}
+
+			deleteButton, ok := actions.Objects[1].(*widget.Button)
+			if !ok {
+				return
+			}
 
 			currentBusy, currentLoading := getOperationState()
 			actionsEnabled := !currentBusy && !currentLoading
@@ -401,6 +444,9 @@ func New(
 					window,
 				)
 			}
+
+			obj.Refresh()
+			entryList.SetItemHeight(id, obj.MinSize().Height)
 		},
 	)
 

@@ -30,187 +30,264 @@ func newUserListSection(
 		)
 	}
 
-	table := widget.NewTable(
-		func() (int, int) {
-			return len(users) + 1, 5
+	// Shared row layout builder so header and list rows share exact column alignment
+	buildRowContainer := func(
+		actionObj fyne.CanvasObject,
+		identityObj fyne.CanvasObject,
+		joinAtObj fyne.CanvasObject,
+		statusObj fyne.CanvasObject,
+		deleteObj fyne.CanvasObject,
+	) *fyne.Container {
+		// Left fixed-width slot for Approve / Revoke / Reactivate button
+		leftSlot := container.NewGridWrap(fyne.NewSize(130, 36), actionObj)
+
+		// Right fixed-width slot for Delete icon button
+		rightSlot := container.NewGridWrap(fyne.NewSize(40, 36), deleteObj)
+
+		// Center 3 columns (Sot Identity, Join At, Status)
+		centerGrid := container.NewGridWithColumns(
+			3,
+			container.NewBorder(nil, nil, nil, nil, identityObj),
+			container.NewBorder(nil, nil, nil, nil, joinAtObj),
+			container.NewBorder(nil, nil, nil, nil, statusObj),
+		)
+
+		return container.NewBorder(nil, nil, leftSlot, rightSlot, centerGrid)
+	}
+
+	// Header row
+	hIdentity := widget.NewLabel("Sot Identity")
+	hIdentity.TextStyle.Bold = true
+
+	hJoinAt := widget.NewLabel("Join At")
+	hJoinAt.TextStyle.Bold = true
+
+	hStatus := widget.NewLabel("Status")
+	hStatus.TextStyle.Bold = true
+
+	header := buildRowContainer(
+		widget.NewLabel(""),
+		hIdentity,
+		hJoinAt,
+		hStatus,
+		widget.NewLabel(""),
+	)
+
+	var userList *widget.List
+	userList = widget.NewList(
+		func() int {
+			return len(users)
 		},
 		func() fyne.CanvasObject {
-			return container.NewMax(
-				widget.NewLabel(""),
+			actionButton := widget.NewButtonWithIcon("", theme.VisibilityIcon(), nil)
+
+			identity := widget.NewLabel("")
+			identity.Wrapping = fyne.TextWrapBreak
+			identity.TextStyle = fyne.TextStyle{Bold: true}
+
+			joinAt := widget.NewLabel("")
+
+			// Placeholder container for status indicator widget
+			statusHolder := container.NewMax()
+
+			deleteButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), nil)
+			deleteButton.Importance = widget.DangerImportance
+
+			// Wrap buttons in NewVBox so they keep a fixed natural height when identity wraps
+			actionBox := container.NewVBox(
+				container.NewHBox(
+					layout.NewSpacer(),
+					actionButton,
+				),
+			)
+
+			deleteBox := container.NewVBox(deleteButton)
+
+			return buildRowContainer(
+				actionBox,
+				identity,
+				joinAt,
+				statusHolder,
+				deleteBox,
 			)
 		},
-		func(id widget.TableCellID, cell fyne.CanvasObject) {
-			cellContainer := cell.(*fyne.Container)
-			cellContainer.Objects = nil
-
-			if id.Row == 0 {
-				headers := []string{
-					"",
-					"Sot Identity",
-					"Join At",
-					"Status",
-					"",
-				}
-
-				label := widget.NewLabel(headers[id.Col])
-				label.TextStyle.Bold = true
-
-				cellContainer.Add(label)
-				cellContainer.Refresh()
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			if id < 0 || id >= len(users) {
 				return
 			}
 
-			user := users[id.Row-1]
+			user := users[id]
 
-			switch id.Col {
-			case 0:
-				var button *widget.Button
+			row, ok := obj.(*fyne.Container)
+			if !ok || len(row.Objects) < 3 {
+				return
+			}
 
-				switch user.Status {
-				case entity.UserStatusPending:
-					button = widget.NewButtonWithIcon(
-						"Approve",
-						theme.VisibilityIcon(),
-						func() {
-							if onApprove != nil {
-								onApprove(user)
-							}
-						},
-					)
+			// Border Objects order when center, left, right are all non-nil:
+			// Objects[0] = centerGrid, Objects[1] = leftSlot, Objects[2] = rightSlot
+			centerGrid, ok := row.Objects[0].(*fyne.Container)
+			if !ok || len(centerGrid.Objects) < 3 {
+				return
+			}
 
-				case entity.UserStatusApproved:
-					button = widget.NewButtonWithIcon(
-						"Revoke",
-						theme.VisibilityOffIcon(),
-						func() {
-							if onRevoke != nil {
-								onRevoke(user)
-							}
-						},
-					)
+			leftSlot, ok := row.Objects[1].(*fyne.Container)
+			if !ok || len(leftSlot.Objects) == 0 {
+				return
+			}
 
-				case entity.UserStatusRevoked:
-					button = widget.NewButtonWithIcon(
-						"Reactivate",
-						theme.VisibilityIcon(),
-						func() {
-							if onApprove != nil {
-								onApprove(user)
-							}
-						},
-					)
+			rightSlot, ok := row.Objects[2].(*fyne.Container)
+			if !ok || len(rightSlot.Objects) == 0 {
+				return
+			}
+
+			// Unwrap actionButton: leftSlot -> actionBox (VBox) -> HBox -> [Spacer, actionButton]
+			actionBox, ok := leftSlot.Objects[0].(*fyne.Container)
+			if !ok || len(actionBox.Objects) == 0 {
+				return
+			}
+
+			actionHBox, ok := actionBox.Objects[0].(*fyne.Container)
+			if !ok || len(actionHBox.Objects) < 2 {
+				return
+			}
+
+			actionButton, ok := actionHBox.Objects[1].(*widget.Button)
+			if !ok {
+				return
+			}
+
+			// Unwrap centerGrid columns
+			identityCell, ok := centerGrid.Objects[0].(*fyne.Container)
+			if !ok || len(identityCell.Objects) == 0 {
+				return
+			}
+
+			joinAtCell, ok := centerGrid.Objects[1].(*fyne.Container)
+			if !ok || len(joinAtCell.Objects) == 0 {
+				return
+			}
+
+			statusCell, ok := centerGrid.Objects[2].(*fyne.Container)
+			if !ok || len(statusCell.Objects) == 0 {
+				return
+			}
+
+			identity, ok := identityCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			joinAt, ok := joinAtCell.Objects[0].(*widget.Label)
+			if !ok {
+				return
+			}
+
+			statusHolder, ok := statusCell.Objects[0].(*fyne.Container)
+			if !ok {
+				return
+			}
+
+			// Unwrap deleteButton: rightSlot -> deleteBox (VBox) -> deleteButton
+			deleteBox, ok := rightSlot.Objects[0].(*fyne.Container)
+			if !ok || len(deleteBox.Objects) == 0 {
+				return
+			}
+
+			deleteButton, ok := deleteBox.Objects[0].(*widget.Button)
+			if !ok {
+				return
+			}
+
+			// 1. Configure action button based on status
+			switch user.Status {
+			case entity.UserStatusPending:
+				actionButton.Show()
+				actionButton.SetText("Approve")
+				actionButton.SetIcon(theme.VisibilityIcon())
+				actionButton.OnTapped = func() {
+					if onApprove != nil {
+						onApprove(user)
+					}
 				}
 
-				if button != nil {
-					cellContainer.Add(
-						container.New(
-							layout.NewCustomPaddedLayout(
-								2, // top
-								2, // bottom
-								0, // left
-								0, // right
-							),
-							container.NewHBox(
-								layout.NewSpacer(),
-								button,
-							),
-						),
-					)
+			case entity.UserStatusApproved:
+				actionButton.Show()
+				actionButton.SetText("Revoke")
+				actionButton.SetIcon(theme.VisibilityOffIcon())
+				actionButton.OnTapped = func() {
+					if onRevoke != nil {
+						onRevoke(user)
+					}
 				}
 
-			case 1:
-				sotIdentity := user.SotIdentity
-				if sotIdentity == "" {
-					sotIdentity = "Unknown identity"
+			case entity.UserStatusRevoked:
+				actionButton.Show()
+				actionButton.SetText("Reactivate")
+				actionButton.SetIcon(theme.VisibilityIcon())
+				actionButton.OnTapped = func() {
+					if onApprove != nil {
+						onApprove(user)
+					}
 				}
 
-				label := widget.NewLabelWithStyle(
-					sotIdentity,
-					fyne.TextAlignLeading,
-					fyne.TextStyle{Bold: true},
-				)
+			default:
+				actionButton.Hide()
+			}
 
-				cellContainer.Add(vCenter(label))
+			// 2. Configure Sot Identity
+			sotIdentity := user.SotIdentity
+			if sotIdentity == "" {
+				sotIdentity = "Unknown identity"
+			}
+			identity.SetText(sotIdentity)
 
-			case 2:
-				createdAt := "Unknown date"
+			// 3. Configure Join At
+			createdAt := "Unknown date"
+			if parsedTime, err := ULIDToTime(user.ID); err == nil {
+				createdAt = parsedTime.Format("02 Jan 2006 15:04:05")
+			}
+			joinAt.SetText(createdAt)
 
-				if parsedTime, err := ULIDToTime(user.ID); err == nil {
-					createdAt = parsedTime.Format("02 Jan 2006 15:04:05")
+			// 4. Configure Status Indicator
+			statusHolder.Objects = []fyne.CanvasObject{
+				newStatusIndicator(user.Status),
+			}
+			statusHolder.Refresh()
+
+			// 5. Configure Delete Button
+			deleteButton.OnTapped = func() {
+				displayIdentity := user.SotIdentity
+				if displayIdentity == "" {
+					displayIdentity = "Unknown identity"
 				}
 
-				cellContainer.Add(vCenter(widget.NewLabel(createdAt)))
-
-			case 3:
-				cellContainer.Add(
-					container.New(
-						layout.NewCustomPaddedLayout(
-							0, 0, 8, 0,
-						),
-						newStatusIndicator(user.Status),
+				dialog.ShowConfirm(
+					"Delete User",
+					fmt.Sprintf(
+						"Are you sure you want to delete user %q?",
+						displayIdentity,
 					),
-				)
-
-			case 4:
-				deleteButton := widget.NewButtonWithIcon(
-					"",
-					theme.DeleteIcon(),
-					func() {
-						sotIdentity := user.SotIdentity
-						if sotIdentity == "" {
-							sotIdentity = "Unknown identity"
+					func(confirmed bool) {
+						if confirmed && onDelete != nil {
+							onDelete(user)
 						}
-
-						dialog.ShowConfirm(
-							"Delete User",
-							fmt.Sprintf(
-								"Are you sure you want to delete user %q?",
-								sotIdentity,
-							),
-							func(confirmed bool) {
-								if confirmed && onDelete != nil {
-									onDelete(user)
-								}
-							},
-							window,
-						)
 					},
-				)
-
-				deleteButton.Importance = widget.DangerImportance
-
-				cellContainer.Add(
-					container.New(
-						layout.NewCustomPaddedLayout(
-							2, // top
-							2, // bottom
-							0, // left
-							4, // right
-						),
-						deleteButton,
-					),
+					window,
 				)
 			}
 
-			cellContainer.Refresh()
+			obj.Refresh()
+			userList.SetItemHeight(id, obj.MinSize().Height)
 		},
 	)
 
-	table.SetColumnWidth(0, 130)
-	table.SetColumnWidth(1, 150)
-	table.SetColumnWidth(2, 200)
-	table.SetColumnWidth(3, 200)
-	table.SetColumnWidth(4, 40)
-
-	table.SetRowHeight(0, 36)
-
-	for i := 1; i <= len(users); i++ {
-		table.SetRowHeight(i, 42)
-	}
-
-	table.HideSeparators = true
-
-	return table
+	return container.NewBorder(
+		header,
+		nil,
+		nil,
+		nil,
+		userList,
+	)
 }
 
 func ULIDToTime(id string) (time.Time, error) {
